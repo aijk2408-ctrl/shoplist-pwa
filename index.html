@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#178d98">
+<meta name="color-scheme" content="light">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="購物清單">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+<title>出國購物清單</title>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div>
+      <div class="trip-label">目前旅程</div>
+      <h1 id="trip-title">出國購物清單</h1>
+    </div>
+    <button type="button" class="icon-btn" id="btn-trip-switch" aria-label="切換旅程" title="切換旅程">⇄</button>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- 清單 -->
+  <section class="view" id="view-list" data-view="list">
+    <div class="summary" id="summary"></div>
+    <div class="filters">
+      <div class="chips" id="brand-chips"></div>
+      <div class="chips status-chips">
+        <button type="button" class="chip active" data-status="all">全部</button>
+        <button type="button" class="chip" data-status="todo">未買</button>
+        <button type="button" class="chip" data-status="done">已買</button>
+      </div>
+    </div>
+    <div id="item-list" class="item-list"></div>
+    <div id="empty-state" class="empty" hidden>
+      <p class="empty-title">清單還是空的</p>
+      <p>先把想買的東西列進來，到店再改現場標價，馬上知道值不值得買。</p>
+      <div class="row">
+        <button type="button" class="btn primary" id="btn-empty-add">新增商品</button>
+        <button type="button" class="btn" id="btn-empty-sample">載入沖繩範例</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 退稅 -->
+  <section class="view" id="view-refund" data-view="refund" hidden>
+    <div class="card note" id="refund-mode-note"></div>
+    <div class="card">
+      <div class="card-head"><h2>合計</h2>
+        <label class="switch"><input type="checkbox" id="refund-bought-only"><span>只算已購買</span></label>
+      </div>
+      <div class="totals" id="refund-totals"></div>
+    </div>
+    <h2 class="section-title">各店各日門檻</h2>
+    <p class="hint" id="threshold-hint"></p>
+    <div id="refund-groups"></div>
+    <div class="card" id="checklist-card">
+      <h2>出境前檢查</h2>
+      <div id="checklist"></div>
+    </div>
+  </section>
+
+  <!-- 設定 -->
+  <section class="view" id="view-settings" data-view="settings" hidden>
+    <form id="trip-form" class="card" autocomplete="off">
+      <h2>旅程設定</h2>
+      <label>旅程名稱<input type="text" name="name" required></label>
+      <label>國家與退稅規則
+        <select name="countryKey" id="country-select"></select>
+      </label>
+      <p class="hint" id="country-hint"></p>
+      <div class="grid2">
+        <label>當地幣別<input type="text" name="local" maxlength="3" placeholder="JPY"></label>
+        <label>本國幣別<input type="text" name="home" maxlength="3" placeholder="TWD"></label>
+      </div>
+      <label>匯率：1 <span class="local-code">JPY</span> ＝ ? <span class="home-code">TWD</span>
+        <input type="number" name="fx" step="0.0001" min="0.000001" inputmode="decimal" required>
+      </label>
+      <p class="hint">參考 <a href="https://rate.bot.com.tw/xrt?Lang=zh-TW" target="_blank" rel="noopener">臺銀牌告匯率 ↗</a>（現金或即期賣出）。若填的是刷卡實際匯率，下方手續費請設 0。</p>
+      <div class="grid2">
+        <label>刷卡手續費 %<input type="number" name="cardFee" step="0.1" min="0" max="20" inputmode="decimal"></label>
+        <label>消費稅率 %<input type="number" name="taxRate" step="0.1" min="0" max="50" inputmode="decimal"></label>
+      </div>
+      <div class="grid2">
+        <label>免稅門檻（未稅，同店同日）<input type="number" name="threshold" step="1" min="0" inputmode="numeric"></label>
+        <label>出境日期<input type="date" name="departDate"></label>
+      </div>
+      <fieldset class="radio-group">
+        <legend>退稅方式</legend>
+        <label><input type="radio" name="mode" value="refund">出境退稅：店內付含稅價，離境時退稅</label>
+        <label><input type="radio" name="mode" value="instant">現場免稅：店內直接付未稅價</label>
+      </fieldset>
+      <div class="row">
+        <button type="submit" class="btn primary">儲存設定</button>
+      </div>
+    </form>
+
+    <div class="card">
+      <h2>旅程</h2>
+      <div id="trip-list" class="trip-list"></div>
+      <div class="row">
+        <button type="button" class="btn" id="btn-trip-new">新增旅程</button>
+        <button type="button" class="btn danger" id="btn-trip-delete">刪除目前旅程</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>資料與分享</h2>
+      <div class="row wrap">
+        <button type="button" class="btn" id="btn-copy-summary">複製清單文字</button>
+        <button type="button" class="btn" id="btn-export">匯出備份檔</button>
+        <label class="btn file-btn">匯入備份檔<input type="file" id="file-import" accept="application/json,.json" hidden></label>
+        <button type="button" class="btn" id="btn-sample">載入沖繩範例</button>
+      </div>
+      <p class="hint">資料只存在這支手機的瀏覽器，不會上傳。換手機請用匯出／匯入；要給同行者看，先複製清單文字貼到 LINE。</p>
+    </div>
+
+    <div class="card" id="install-card">
+      <h2>安裝到主畫面</h2>
+      <button type="button" class="btn primary" id="btn-install" hidden>安裝 App</button>
+      <p class="hint" id="install-hint"></p>
+    </div>
+
+    <div class="card">
+      <h2>關於試算</h2>
+      <p class="hint">所有金額皆為試算，非官方計算。日本規則依 2026/11/1 起的出境退稅制整理，查核日期 2026/11/3；各店是否可免稅、折價券能否併用，請以店員確認為準。</p>
+    </div>
+  </section>
+</main>
+
+<button type="button" class="fab" id="btn-add" aria-label="新增商品">＋</button>
+
+<nav class="tabbar">
+  <button type="button" class="tab active" data-tab="list"><span class="tab-icon">🛍️</span>清單</button>
+  <button type="button" class="tab" data-tab="refund"><span class="tab-icon">🧾</span>退稅</button>
+  <button type="button" class="tab" data-tab="settings"><span class="tab-icon">⚙️</span>設定</button>
+</nav>
+
+<!-- 商品編輯 -->
+<div class="sheet" id="editor" hidden>
+  <div class="sheet-inner">
+    <header class="sheet-head">
+      <button type="button" class="link-btn" id="btn-editor-cancel">取消</button>
+      <h2 id="editor-title">新增商品</h2>
+      <button type="button" class="link-btn strong" id="btn-editor-save">儲存</button>
+    </header>
+    <form id="item-form" class="sheet-body" autocomplete="off">
+      <input type="hidden" name="id">
+      <div class="photo-row">
+        <div class="photo-box" id="photo-box"><span class="photo-empty">＋ 照片</span></div>
+        <div class="photo-actions">
+          <label class="btn small">拍照／選圖<input type="file" id="photo-input" accept="image/*" capture="environment" hidden></label>
+          <button type="button" class="btn small" id="btn-photo-clear">移除照片</button>
+        </div>
+      </div>
+      <div class="grid2">
+        <label>品牌<input type="text" name="brand" placeholder="例：On"></label>
+        <label>數量<input type="number" name="qty" min="1" step="1" value="1" inputmode="numeric"></label>
+      </div>
+      <label>商品名稱<input type="text" name="name" required placeholder="例：Cloud X 5"></label>
+      <label>規格／備註<input type="text" name="note" placeholder="尺寸、顏色、型號、要確認的事"></label>
+      <div class="grid2">
+        <label>預定店家<input type="text" name="store" list="store-list" placeholder="例：Sports Depo 天久店"></label>
+        <label>購買日期<input type="date" name="date"></label>
+      </div>
+      <datalist id="store-list"></datalist>
+
+      <h3>價格</h3>
+      <div class="grid2">
+        <label>本國參考價（<span class="home-code">TWD</span>）<input type="number" name="homePrice" min="0" step="1" inputmode="decimal"></label>
+        <label>當地含稅標價（<span class="local-code">JPY</span>）<input type="number" name="localPrice" min="0" step="1" inputmode="decimal"></label>
+      </div>
+      <label class="check"><input type="checkbox" name="taxFree" checked>可辦免稅／退稅（須符合門市條件）</label>
+      <div class="grid2">
+        <label>折價券 %<input type="number" name="coupon" min="0" max="99" step="0.1" value="0" inputmode="decimal"></label>
+        <label class="check tall"><input type="checkbox" name="couponConfirmed">店員已確認此商品可用券</label>
+      </div>
+      <label class="check"><input type="checkbox" name="bought">已購買</label>
+
+      <div class="result" id="editor-result" aria-live="polite"></div>
+      <div class="row">
+        <button type="button" class="btn danger" id="btn-editor-delete" hidden>刪除商品</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
