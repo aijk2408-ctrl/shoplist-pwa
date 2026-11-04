@@ -41,6 +41,7 @@
       </div>
       <p class="hint" id="quick-hint"></p>
     </form>
+    <div class="row left"><button type="button" class="btn small" id="btn-coupons">🎫 我的券</button><span class="hint" id="coupon-hint"></span></div>
 
     <div class="filters">
       <div class="chips" id="store-chips"></div>
@@ -84,6 +85,11 @@
       <h2>出境前檢查</h2>
       <div id="checklist"></div>
     </div>
+    <div class="card" id="guide-card">
+      <h2>退稅指引</h2>
+      <p class="hint" id="guide-meta"></p>
+      <div id="guide-body"></div>
+    </div>
   </section>
 
   <!-- 設定 -->
@@ -108,6 +114,7 @@
         <label>預算（<span class="local-code">JPY</span>，選填）<input type="number" name="budget" step="1" min="0" inputmode="numeric" placeholder="例：80000"></label>
         <label>出境日期<input type="date" name="departDate"></label>
       </div>
+      <label id="airport-row">出境機場（退稅指引會依此顯示）<select name="airport" id="airport-select"></select></label>
 
       <h3>付款與手續費</h3>
       <label>預設刷卡手續費 %<input type="number" name="cardFee" step="0.1" min="0" max="20" inputmode="decimal"></label>
@@ -221,6 +228,7 @@
       <label>店家<input type="text" name="store" list="store-list" placeholder="例：松本清 心齋橋店"></label>
       <datalist id="store-list"></datalist>
       <div class="chips store-quick" id="store-quick"></div>
+      <div class="coupon-note" id="store-coupon-note" hidden></div>
       <div class="grid2">
         <label>購買日期<input type="date" name="date"></label>
         <label class="check tall"><input type="checkbox" name="bought">已購買</label>
@@ -280,6 +288,46 @@
   </div>
 </div>
 
+<!-- 我的券 -->
+<div class="sheet" id="coupons" hidden>
+  <div class="sheet-inner">
+    <header class="sheet-head">
+      <button type="button" class="link-btn" id="btn-coupons-close">關閉</button>
+      <h2>🎫 我的券</h2>
+      <span></span>
+    </header>
+    <div class="sheet-body">
+      <p class="hint">把店家給的券、網路截圖或會員 QR 存在這裡，綁定店家後，到那家店會自動提醒。點圖片可放大給店員掃。</p>
+      <div id="coupon-list" class="coupon-list"></div>
+      <form id="coupon-form" class="card" autocomplete="off">
+        <h3>新增券</h3>
+        <input type="hidden" name="id">
+        <label>店家（和商品的店家名一致就會自動提醒）<input type="text" name="store" list="store-list" placeholder="例：唐吉訶德、Bic Camera"></label>
+        <label>券名<input type="text" name="title" placeholder="例：免稅＋7% 折扣券"></label>
+        <div class="grid2">
+          <label>有效期限<input type="date" name="expires"></label>
+          <label>條件備註<input type="text" name="note" placeholder="例：不可與其他優惠併用"></label>
+        </div>
+        <div class="photo-row">
+          <div class="photo-box" id="coupon-photo-box"><span class="photo-empty">＋ 券圖</span></div>
+          <div class="photo-actions">
+            <label class="btn small">📷 拍照<input type="file" id="coupon-camera" accept="image/*" capture="environment" hidden></label>
+            <label class="btn small">🖼️ 從相簿選<input type="file" id="coupon-photo" accept="image/*" hidden></label>
+            <button type="button" class="btn small" id="btn-coupon-photo-clear">移除</button>
+          </div>
+        </div>
+        <div class="row">
+          <button type="submit" class="btn primary wide" id="btn-coupon-save">儲存券</button>
+        </div>
+        <div class="row"><button type="button" class="btn small" id="btn-coupon-reset" hidden>取消編輯</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- 圖片放大 -->
+<div class="viewer" id="viewer" hidden><img id="viewer-img" alt="券圖放大"><p class="hint">點任意處關閉</p></div>
+
 <!-- 首次設定 -->
 <div class="sheet" id="onboard" hidden>
   <div class="sheet-inner">
@@ -316,6 +364,7 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<script src="guides.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

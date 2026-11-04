@@ -8,19 +8,19 @@
   // 國家規則預設值（試算用，非官方；可在設定中覆寫）
   const COUNTRIES = {
     JP_REFUND: {
-      label: '日本（2026/11/1 起・出境退稅）', local: 'JPY', taxRate: 10, threshold: 5000, mode: 'refund',
+      label: '日本（2026/11/1 起・出境退稅）', local: 'JPY', taxRate: 10, threshold: 5000, mode: 'refund', guide: 'JP',
       hint: '店內付含稅價；出境前先在海關端末或 Visit Japan Web 辦理，再依店家指定方式退款。同店同日未稅滿 ¥5,000 才可退；需在出境前 90 天內購買，商品出境時須全部隨身。食品飲料稅率 8%，可在商品上個別設定。'
     },
     JP_OLD: {
-      label: '日本（2026/10/31 前購買・現場免稅）', local: 'JPY', taxRate: 10, threshold: 5000, mode: 'instant',
+      label: '日本（2026/10/31 前購買・現場免稅）', local: 'JPY', taxRate: 10, threshold: 5000, mode: 'instant', guide: 'JP',
       hint: '2026/10/31 以前購買適用：店內直接付未稅價，或在免稅櫃台當場退稅。同店同日未稅滿 ¥5,000。'
     },
     KR: {
-      label: '韓國（現場即時退稅，參考值）', local: 'KRW', taxRate: 10, threshold: 15000, mode: 'instant',
+      label: '韓國（現場即時退稅，參考值）', local: 'KRW', taxRate: 10, threshold: 15000, mode: 'instant', guide: 'KR',
       hint: '參考值：單筆 ₩15,000 以上多數店家可即時退稅，另有單筆與總額上限；請以店家公告為準並自行調整。'
     },
     TH: {
-      label: '泰國（機場退稅，參考值）', local: 'THB', taxRate: 7, threshold: 2000, mode: 'refund', tripMinTotal: 5000, refundRatio: 100, refundFeePct: 0,
+      label: '泰國（機場退稅，參考值）', local: 'THB', taxRate: 7, threshold: 2000, mode: 'refund', tripMinTotal: 5000, refundRatio: 100, refundFeePct: 0, guide: 'TH',
       hint: '參考值：同店同日滿 ฿2,000 並索取退稅表單，全程合計滿 ฿5,000，出境時在機場辦理，實際退回會扣手續費；請在進階參數調整「實際退回比例」。'
     },
     CUSTOM: {
@@ -73,9 +73,20 @@
     return Object.assign({
       id: uid(), name: '新旅程', countryKey: 'JP_REFUND', local: base.local, home: 'TWD', fx: 0.21, fxDefault: true, cardFee: 0, cards: [],
       budget: 0, taxRate: base.taxRate, threshold: base.threshold, mode: base.mode, refundEnabled: true, refundFeePct: 0, refundRatio: 100, tripMinTotal: 0,
-      departDate: '', lastStore: '', lastBuyer: '', onboarded: false, checklist: {}, createdAt: Date.now(), updatedAt: Date.now()
+      departDate: '', airport: '', coupons: [], lastStore: '', lastBuyer: '', onboarded: false, checklist: {}, createdAt: Date.now(), updatedAt: Date.now()
     }, overrides || {});
   }
+  function guideFor(trip) {
+    const c = COUNTRIES[trip.countryKey];
+    const code = c && c.guide;
+    return code && window.SHOPLIST_GUIDES && window.SHOPLIST_GUIDES[code] ? window.SHOPLIST_GUIDES[code] : null;
+  }
+  function couponsFor(trip, store) {
+    const s = normStore(store);
+    if (!s) return [];
+    return (trip.coupons || []).filter((c) => { const cs = normStore(c.store); return cs && (s.includes(cs) || cs.includes(s)); });
+  }
+  function couponExpired(c) { return !!c.expires && c.expires < today(); }
   function newItem(tripId, overrides) {
     return Object.assign({
       id: uid(), tripId, brand: '', name: '', note: '', store: '', date: '', buyer: '', card: '', qty: 1, homePrice: 0, localPrice: 0, altPrice: 0, altLabel: '',
@@ -91,7 +102,7 @@
         const s = JSON.parse(raw);
         if (s && Array.isArray(s.trips) && Array.isArray(s.items) && s.trips.length) {
           // 舊資料補欄位
-          s.trips.forEach((t) => { if (!Array.isArray(t.cards)) t.cards = []; if (t.onboarded == null) t.onboarded = true; });
+          s.trips.forEach((t) => { if (!Array.isArray(t.cards)) t.cards = []; if (!Array.isArray(t.coupons)) t.coupons = []; if (t.onboarded == null) t.onboarded = true; });
           s.items.forEach((i) => { if (!Array.isArray(i.quotes)) i.quotes = []; });
           return s;
         }
@@ -344,6 +355,9 @@
     const lastBuyer = trip.lastBuyer || '';
     $('#quick-hint').textContent = `會記為「已購買、今天」${lastStore ? `，店家沿用「${lastStore}」` : ''}${lastBuyer ? `，買者「${lastBuyer}」` : ''}；之後點卡片可補細節。`;
     $('#quick-form').price.placeholder = `標價（${sym(trip.local) || trip.local}）`;
+    const nCoupons = (trip.coupons || []).filter((c) => !couponExpired(c)).length;
+    $('#btn-coupons').textContent = `🎫 我的券${nCoupons ? `（${nCoupons}）` : ''}`;
+    $('#coupon-hint').textContent = nCoupons ? '到有券的店家，卡片會顯示 🎫' : '存店家的券或會員 QR，到店自動提醒';
 
     // 篩選列
     const stores = recentStores(trip).sort((a, b) => a.localeCompare(b));
@@ -388,6 +402,8 @@
         : `<span class="badge ${r.verdict}">${r.verdictText.slice(0, 1)} ${r.saving >= 0 ? '省' : '多'} ${money(Math.abs(r.saving), trip.home)}・${pct(Math.abs(r.ratio))}</span>`;
       const tags = [];
       if (it.buyer) tags.push(`👤 ${it.buyer}`);
+      const cps = couponsFor(trip, it.store).filter((c) => !couponExpired(c));
+      if (cps.length) tags.push(`🎫 有券 ${cps.length} 張`);
       if (it.priceIsPretax) tags.push('標價已免稅');
       if (it.taxRate != null && it.taxRate !== '' && num(it.taxRate) !== num(trip.taxRate)) tags.push(`稅率 ${num(it.taxRate)}%`);
       const cn = cardName(it, trip); if (cn) tags.push(cn);
@@ -498,6 +514,116 @@
     trip.checklist = trip.checklist || {};
     $('#checklist-card').hidden = !refundOn(trip);
     $('#checklist').innerHTML = list.map((text, i) => `<label class="checklist-item"><input type="checkbox" data-check="${i}" ${trip.checklist[i] ? 'checked' : ''}><span>${esc(text)}</span></label>`).join('');
+    renderGuide(trip);
+  }
+
+  // ---------- 退稅指引與券入口 ----------
+  function renderGuide(trip) {
+    const g = guideFor(trip);
+    const card = $('#guide-card');
+    if (!g) {
+      card.hidden = false;
+      $('#guide-meta').textContent = '這個國家目前還沒有指引。';
+      $('#guide-body').innerHTML = '<p class="hint">指引依國家載入，之後會陸續補上其他國家。</p>';
+      return;
+    }
+    card.hidden = false;
+    $('#guide-meta').textContent = `${g.country}・整理資訊非官方，查核日期 ${g.checked}。`;
+    const sec = ui.guideTab || 'rules';
+    const tabs = [['rules', '新制說明'], ['stores', '店家類型'], ['airports', '機場流程'], ['coupons', '券入口']];
+    let body = `<div class="guide-tabs">${tabs.map(([k, l]) => `<button type="button" class="chip ${sec === k ? 'active' : ''}" data-guide-tab="${k}">${l}</button>`).join('')}</div>`;
+    const srcs = (arr) => arr && arr.length ? `<div class="guide-src">來源：${arr.map((s) => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)} ↗</a>`).join('')}</div>` : '';
+    if (sec === 'rules') {
+      body += `<div class="guide-section"><h3>${esc(g.rules.title)}</h3>${g.rules.sections.map((s) => `<h3>${esc(s.h)}</h3><ul>${s.p.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>`).join('')}${srcs(g.rules.sources)}</div>`;
+    } else if (sec === 'stores') {
+      body += `<div class="guide-section">${g.storeTypes.map((s) => `<div class="store-type"><b>${esc(s.type)}</b><span>${esc(s.examples)}</span><p>流程：${esc(s.flow)}</p><p>退款：${esc(s.refund)}</p><p>提醒：${esc(s.tips)}</p></div>`).join('')}</div>`;
+    } else if (sec === 'airports') {
+      const list = g.airports || [];
+      if (!list.length) body += '<p class="hint">機場資訊整理中。</p>';
+      else {
+        if (g.airportsNote) body += `<p class="hint">${esc(g.airportsNote)}</p>`;
+        const cur = list.find((a) => a.code === trip.airport) || list[0];
+        body += `<div class="chips">${list.map((a) => `<button type="button" class="chip ${a.code === cur.code ? 'active' : ''}" data-guide-airport="${esc(a.code)}">${esc(a.short || a.code)}</button>`).join('')}</div>`;
+        const conf = cur.confidence === 'official' ? '<span class="conf official">官方已公布</span>' : (cur.confidence === 'media' ? '<span class="conf">媒體轉述</span>' : '<span class="conf">尚未公布</span>');
+        body += `<div class="guide-section"><h3>${esc(cur.name)} ${conf}</h3>
+          ${cur.steps && cur.steps.length ? `<p><b>流程</b></p><ul>${cur.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : ''}
+          ${cur.location ? `<p><b>位置</b>：${esc(cur.location)}</p>` : ''}
+          ${cur.time ? `<p><b>時間提醒</b>：${esc(cur.time)}</p>` : ''}
+          ${cur.cash ? `<p><b>現金退款</b>：${esc(cur.cash)}</p>` : ''}
+          ${cur.note ? `<p class="hint">${esc(cur.note)}</p>` : ''}
+          ${srcs(cur.sources)}<div class="guide-src">查證日期 ${esc(cur.checked || g.checked)}</div></div>`;
+        if (!trip.airport) body += '<p class="hint">在設定頁選「出境機場」後，這裡會固定顯示你的機場。</p>';
+      }
+    } else if (sec === 'coupons') {
+      const c = g.coupons || { groups: [] };
+      body += `<p class="hint">${esc(c.note || '')}</p>`;
+      if (!c.groups || !c.groups.length) body += '<p class="hint">官方優惠頁連結整理中。</p>';
+      else {
+        const confTag = (k) => k === 'official' ? '<span class="conf official">官方</span>' : (k === 'partner' ? '<span class="conf">官方合作平台</span>' : (k === 'unverified' ? '<span class="conf warn">待確認</span>' : ''));
+        body += c.groups.map((grp) => `<div class="guide-section"><h3>${esc(grp.name)}</h3>${grp.stores.map((s) => `<div class="coupon-link"><div><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)} ↗</a>${confTag(s.confidence)}<div class="cl-meta">${esc(s.summary || '')}${s.conditions ? `｜${esc(s.conditions)}` : ''}${s.valid ? `｜效期 ${esc(s.valid)}` : ''}</div></div></div>`).join('')}</div>`).join('');
+        if (c.none) body += `<p class="hint">${esc(c.none)}</p>`;
+      }
+      body += '<div class="row"><button type="button" class="btn small" data-open-coupons>🎫 把券截圖存到我的券</button></div>';
+    }
+    $('#guide-body').innerHTML = body;
+  }
+
+  // ---------- 我的券 ----------
+  function openCoupons(prefillStore) {
+    const trip = currentTrip();
+    ui.couponPhoto = null; ui.couponEditId = '';
+    const form = $('#coupon-form'); form.reset(); form.id.value = '';
+    if (prefillStore) form.store.value = prefillStore;
+    $('#btn-coupon-reset').hidden = true;
+    $('#store-list').innerHTML = recentStores(trip).map((s) => `<option value="${esc(s)}">`).join('');
+    renderCouponPhoto(); renderCoupons(trip);
+    $('#coupons').hidden = false; document.body.style.overflow = 'hidden';
+  }
+  function closeCoupons() { $('#coupons').hidden = true; if ($('#editor').hidden) document.body.style.overflow = ''; renderAll(); if (!$('#editor').hidden) renderStoreCouponNote(); }
+  function renderCouponPhoto() {
+    $('#coupon-photo-box').innerHTML = ui.couponPhoto ? `<img src="${ui.couponPhoto}" alt="券圖">` : '<span class="photo-empty">＋ 券圖</span>';
+  }
+  function renderCoupons(trip) {
+    const list = (trip.coupons || []).slice().sort((a, b) => (couponExpired(a) ? 1 : 0) - (couponExpired(b) ? 1 : 0) || (a.store || '').localeCompare(b.store || ''));
+    $('#coupon-list').innerHTML = list.length ? list.map((c) => `<div class="coupon-row ${couponExpired(c) ? 'expired' : ''}">
+      ${c.photo ? `<img src="${c.photo}" alt="" data-view="${esc(c.id)}">` : '<div class="no-img">🎫</div>'}
+      <div><div class="c-title">${esc(c.title || '未命名的券')}</div><div class="c-meta">${esc(c.store || '未綁定店家')}${c.expires ? `・到 ${esc(c.expires)}${couponExpired(c) ? '（已過期）' : ''}` : ''}${c.note ? `・${esc(c.note)}` : ''}</div></div>
+      <div class="c-actions"><button type="button" class="btn small" data-coupon-edit="${esc(c.id)}">編輯</button><button type="button" class="btn small danger" data-coupon-del="${esc(c.id)}">刪除</button></div>
+    </div>`).join('') : '<p class="hint">還沒有券。</p>';
+  }
+  function saveCoupon(e) {
+    e.preventDefault();
+    const trip = currentTrip();
+    const form = $('#coupon-form');
+    const title = form.title.value.trim(), store = form.store.value.trim();
+    if (!title && !store && !ui.couponPhoto) { toast('至少填店家或券名'); return; }
+    trip.coupons = trip.coupons || [];
+    const existing = trip.coupons.find((c) => c.id === form.id.value);
+    const data = { store, title, note: form.note.value.trim(), expires: form.expires.value, photo: ui.couponPhoto, updatedAt: Date.now() };
+    if (existing) Object.assign(existing, data); else trip.coupons.push(Object.assign({ id: uid(), createdAt: Date.now() }, data));
+    if (save()) { form.reset(); form.id.value = ''; ui.couponPhoto = null; $('#btn-coupon-reset').hidden = true; renderCouponPhoto(); renderCoupons(trip); toast(existing ? '券已更新' : '券已存好'); }
+  }
+  function editCoupon(id) {
+    const trip = currentTrip(); const c = (trip.coupons || []).find((x) => x.id === id); if (!c) return;
+    const form = $('#coupon-form'); form.id.value = c.id; form.store.value = c.store || ''; form.title.value = c.title || ''; form.note.value = c.note || ''; form.expires.value = c.expires || '';
+    ui.couponPhoto = c.photo || null; renderCouponPhoto(); $('#btn-coupon-reset').hidden = false; form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function deleteCoupon(id) {
+    const trip = currentTrip(); const c = (trip.coupons || []).find((x) => x.id === id); if (!c) return;
+    if (!confirm(`刪除「${c.title || c.store || '這張券'}」？`)) return;
+    trip.coupons = trip.coupons.filter((x) => x.id !== id); save(); renderCoupons(trip); toast('已刪除');
+  }
+  function openViewer(src) { $('#viewer-img').src = src; $('#viewer').hidden = false; }
+  function closeViewer() { $('#viewer').hidden = true; $('#viewer-img').src = ''; }
+  function renderStoreCouponNote() {
+    const trip = currentTrip();
+    const store = $('#item-form').store.value;
+    const cps = couponsFor(trip, store).filter((c) => !couponExpired(c));
+    const box = $('#store-coupon-note');
+    box.hidden = !cps.length;
+    if (!cps.length) return;
+    box.innerHTML = `🎫 這家店你有 ${cps.length} 張券，結帳前出示：${esc(cps.map((c) => c.title || '未命名').join('、'))}
+      <div class="thumbs">${cps.filter((c) => c.photo).map((c) => `<img src="${c.photo}" alt="" data-view="${esc(c.id)}">`).join('')}<button type="button" class="btn small" data-open-coupons>看券</button></div>`;
   }
 
   function renderSettings(trip) {
@@ -524,6 +650,7 @@
     if (radio) radio.checked = true;
     $('#country-hint').textContent = (COUNTRIES[trip.countryKey] || COUNTRIES.CUSTOM).hint;
     renderCards(trip.cards || []);
+    renderAirportSelect(trip);
     renderFxPreview();
 
     $('#trip-list').innerHTML = state.trips.map((t) => {
@@ -534,6 +661,15 @@
     renderInstall();
   }
 
+  function renderAirportSelect(trip, countryKey) {
+    const c = COUNTRIES[countryKey || trip.countryKey];
+    const g = c && c.guide && window.SHOPLIST_GUIDES ? window.SHOPLIST_GUIDES[c.guide] : null;
+    const list = g && g.airports ? g.airports : [];
+    const row = $('#airport-row'); const sel = $('#airport-select');
+    row.hidden = !list.length;
+    sel.innerHTML = ['<option value="">未選擇</option>'].concat(list.map((a) => `<option value="${esc(a.code)}">${esc(a.name)}</option>`)).join('');
+    sel.value = list.some((a) => a.code === trip.airport) ? trip.airport : '';
+  }
   function renderCards(cards) {
     const box = $('#cards-list');
     box.innerHTML = cards.map((c) => `<div class="card-row" data-card="${esc(c.id)}">
@@ -714,6 +850,7 @@
     renderPhoto();
     renderQuotes(trip);
     renderStoreQuick(trip);
+    renderStoreCouponNote();
     setCurrencyLabels(trip.local, trip.home);
     renderTaxRows(trip);
     renderEditorResult();
@@ -853,24 +990,25 @@
     save(); closeEditor(true); renderAll(); toast('已刪除');
   }
 
-  function handlePhoto(file) {
+  function readImage(file, max, quality, cb) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
       img.onload = () => {
-        const max = 640;
         const scale = Math.min(1, max / Math.max(img.width, img.height));
         const canvas = document.createElement('canvas');
         canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
         canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        ui.editorPhoto = canvas.toDataURL('image/jpeg', 0.78);
-        renderPhoto(); saveDraft();
+        cb(canvas.toDataURL('image/jpeg', quality));
       };
       img.src = reader.result;
     };
     reader.readAsDataURL(file);
   }
+  function handlePhoto(file) { readImage(file, 640, 0.78, (data) => { ui.editorPhoto = data; renderPhoto(); saveDraft(); }); }
+  // 券圖保留較高解析度，條碼才掃得到
+  function handleCouponPhoto(file) { readImage(file, 1280, 0.82, (data) => { ui.couponPhoto = data; renderCouponPhoto(); }); }
 
   // ---------- 旅程與設定 ----------
   function saveTripForm(e) {
@@ -891,6 +1029,7 @@
     trip.taxRate = num(form.taxRate.value);
     trip.threshold = num(form.threshold.value);
     trip.departDate = form.departDate.value;
+    trip.airport = form.airport.value || '';
     trip.refundEnabled = form.refundEnabled.checked;
     trip.mode = form.mode.value === 'instant' ? 'instant' : 'refund';
     trip.refundFeePct = num(form.refundFeePct.value);
@@ -912,6 +1051,7 @@
     const radio = form.querySelector(`input[name=mode][value=${c.mode}]`); if (radio) radio.checked = true;
     $('#country-hint').textContent = c.hint;
     $$('.local-code').forEach((el) => { el.textContent = form.local.value || '當地'; });
+    renderAirportSelect(currentTrip(), key);
     renderFxPreview();
   }
 
@@ -965,7 +1105,13 @@
   function mergeState(incoming) {
     let added = 0, updated = 0;
     const tripIds = new Set(state.trips.map((t) => t.id));
-    incoming.trips.forEach((t) => { if (!tripIds.has(t.id)) { state.trips.push(t); tripIds.add(t.id); } });
+    incoming.trips.forEach((t) => {
+      if (!tripIds.has(t.id)) { state.trips.push(t); tripIds.add(t.id); return; }
+      // 同一旅程：合併券
+      const cur = state.trips.find((x) => x.id === t.id);
+      cur.coupons = cur.coupons || [];
+      (t.coupons || []).forEach((c) => { if (!cur.coupons.some((x) => x.id === c.id)) cur.coupons.push(c); });
+    });
     const byId = new Map(state.items.map((i) => [i.id, i]));
     incoming.items.forEach((inc) => {
       const cur = byId.get(inc.id);
@@ -1101,8 +1247,34 @@
     });
     $('#store-quick').addEventListener('click', (e) => {
       const b = e.target.closest('[data-pick-store]');
-      if (b) { $('#item-form').store.value = b.dataset.pickStore; renderEditorResult(); saveDraft(); }
+      if (b) { $('#item-form').store.value = b.dataset.pickStore; renderEditorResult(); renderStoreCouponNote(); saveDraft(); }
     });
+    $('#item-form').store.addEventListener('input', renderStoreCouponNote);
+
+    // 我的券與圖片放大
+    $('#btn-coupons').addEventListener('click', () => openCoupons(''));
+    $('#btn-coupons-close').addEventListener('click', closeCoupons);
+    $('#coupons').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeCoupons(); });
+    $('#coupon-form').addEventListener('submit', saveCoupon);
+    $('#btn-coupon-reset').addEventListener('click', () => { const f = $('#coupon-form'); f.reset(); f.id.value = ''; ui.couponPhoto = null; renderCouponPhoto(); $('#btn-coupon-reset').hidden = true; });
+    $('#coupon-camera').addEventListener('change', (e) => { handleCouponPhoto(e.target.files[0]); e.target.value = ''; });
+    $('#coupon-photo').addEventListener('change', (e) => { handleCouponPhoto(e.target.files[0]); e.target.value = ''; });
+    $('#btn-coupon-photo-clear').addEventListener('click', () => { ui.couponPhoto = null; renderCouponPhoto(); });
+    $('#coupon-list').addEventListener('click', (e) => {
+      const ed = e.target.closest('[data-coupon-edit]'); const del = e.target.closest('[data-coupon-del]'); const v = e.target.closest('[data-view]');
+      if (ed) editCoupon(ed.dataset.couponEdit); else if (del) deleteCoupon(del.dataset.couponDel); else if (v) openViewer(v.src);
+    });
+    document.addEventListener('click', (e) => {
+      const oc = e.target.closest('[data-open-coupons]');
+      if (oc) { openCoupons($('#editor').hidden ? '' : $('#item-form').store.value); return; }
+      const v = e.target.closest('#store-coupon-note [data-view]');
+      if (v) openViewer(v.src);
+      const gt = e.target.closest('[data-guide-tab]');
+      if (gt) { ui.guideTab = gt.dataset.guideTab; renderGuide(currentTrip()); $('#guide-card').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      const ga = e.target.closest('[data-guide-airport]');
+      if (ga) { const t = currentTrip(); t.airport = ga.dataset.guideAirport; save(); renderGuide(t); renderAirportSelect(t); }
+    });
+    $('#viewer').addEventListener('click', closeViewer);
     $('#buyer-quick').addEventListener('click', (e) => {
       const b = e.target.closest('[data-pick-buyer]');
       if (b) { $('#item-form').buyer.value = b.dataset.pickBuyer; renderEditorResult(); saveDraft(); }
