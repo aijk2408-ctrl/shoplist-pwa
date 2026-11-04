@@ -859,6 +859,7 @@
     });
     $('#btn-editor-delete').addEventListener('click', () => deleteItem($('#item-form').id.value));
     $('#photo-input').addEventListener('change', (e) => { handlePhoto(e.target.files[0]); e.target.value = ''; });
+    $('#photo-camera').addEventListener('change', (e) => { handlePhoto(e.target.files[0]); e.target.value = ''; });
     $('#btn-photo-clear').addEventListener('click', () => { ui.editorPhoto = null; renderPhoto(); saveDraft(); });
     $('#editor').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeEditor(false); });
 
