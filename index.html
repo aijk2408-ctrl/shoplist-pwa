@@ -32,7 +32,18 @@
   <!-- 清單 -->
   <section class="view" id="view-list" data-view="list">
     <div class="summary" id="summary"></div>
+
+    <form class="quick" id="quick-form" autocomplete="off">
+      <div class="quick-row">
+        <input type="text" name="name" placeholder="快速記一筆：買了什麼" aria-label="商品名稱" required>
+        <input type="number" name="price" min="0" step="any" inputmode="decimal" placeholder="標價" aria-label="當地標價">
+        <button type="submit" class="btn primary">記下</button>
+      </div>
+      <p class="hint" id="quick-hint"></p>
+    </form>
+
     <div class="filters">
+      <div class="chips" id="store-chips"></div>
       <div class="chips" id="brand-chips"></div>
       <div class="chips status-chips">
         <button type="button" class="chip active" data-status="all">全部</button>
@@ -142,7 +153,7 @@
 <button type="button" class="fab" id="btn-add" aria-label="新增商品">＋</button>
 
 <nav class="tabbar">
-  <button type="button" class="tab active" data-tab="list"><span class="tab-icon">🛍️</span>清單</button>
+  <button type="button" class="tab" data-tab="list"><span class="tab-icon">🛍️</span>清單</button>
   <button type="button" class="tab" data-tab="refund"><span class="tab-icon">🧾</span>退稅</button>
   <button type="button" class="tab" data-tab="settings"><span class="tab-icon">⚙️</span>設定</button>
 </nav>
@@ -157,40 +168,63 @@
     </header>
     <form id="item-form" class="sheet-body" autocomplete="off">
       <input type="hidden" name="id">
-      <div class="photo-row">
-        <div class="photo-box" id="photo-box"><span class="photo-empty">＋ 照片</span></div>
-        <div class="photo-actions">
-          <label class="btn small">拍照／選圖<input type="file" id="photo-input" accept="image/*" capture="environment" hidden></label>
-          <button type="button" class="btn small" id="btn-photo-clear">移除照片</button>
-        </div>
-      </div>
-      <div class="grid2">
-        <label>品牌<input type="text" name="brand" placeholder="例：On"></label>
-        <label>數量<input type="number" name="qty" min="1" step="1" value="1" inputmode="numeric"></label>
-      </div>
-      <label>商品名稱<input type="text" name="name" required placeholder="例：Cloud X 5"></label>
-      <label>規格／備註<input type="text" name="note" placeholder="尺寸、顏色、型號、要確認的事"></label>
-      <div class="grid2">
-        <label>預定店家<input type="text" name="store" list="store-list" placeholder="例：Sports Depo 天久店"></label>
-        <label>購買日期<input type="date" name="date"></label>
-      </div>
-      <datalist id="store-list"></datalist>
 
-      <h3>價格</h3>
-      <div class="grid2">
-        <label>本國參考價（<span class="home-code">TWD</span>）<input type="number" name="homePrice" min="0" step="1" inputmode="decimal"></label>
-        <label>當地含稅標價（<span class="local-code">JPY</span>）<input type="number" name="localPrice" min="0" step="1" inputmode="decimal"></label>
+      <label>商品名稱<input type="text" name="name" required placeholder="例：合利他命 EX Plus 270 錠"></label>
+
+      <div class="price-block">
+        <label class="big-label">當地標價（<span class="local-code">JPY</span>，含稅）
+          <div class="money-input"><span class="prefix local-sym">¥</span><input type="number" name="localPrice" min="0" step="any" inputmode="decimal" placeholder="店內標籤上的價格"></div>
+        </label>
+        <label class="check small-check"><input type="checkbox" name="priceIsPretax">標價已不含稅（機場免稅店、店家已扣稅）</label>
+        <label>本國參考價（<span class="home-code">TWD</span>，選填）
+          <div class="money-input"><span class="prefix home-sym">NT$</span><input type="number" name="homePrice" min="0" step="any" inputmode="decimal" placeholder="台灣大概賣多少，想比價再填"></div>
+        </label>
       </div>
+
+      <div class="result" id="editor-result" aria-live="polite"></div>
+
+      <div class="grid2">
+        <label>數量<input type="number" name="qty" min="1" step="1" value="1" inputmode="numeric"></label>
+        <label>稅率
+          <select name="taxRate">
+            <option value="">依旅程設定</option>
+            <option value="8">8%（食品、飲料）</option>
+            <option value="10">10%（一般商品）</option>
+          </select>
+        </label>
+      </div>
+      <label>店家<input type="text" name="store" list="store-list" placeholder="例：松本清 心齋橋店"></label>
+      <datalist id="store-list"></datalist>
+      <div class="chips store-quick" id="store-quick"></div>
+      <div class="grid2">
+        <label>購買日期<input type="date" name="date"></label>
+        <label class="check tall"><input type="checkbox" name="bought">已購買</label>
+      </div>
+
       <div id="taxfree-row"><label class="check"><input type="checkbox" name="taxFree" checked>可辦免稅／退稅（須符合門市條件）</label></div>
       <div class="grid2">
         <label>折價券 %<input type="number" name="coupon" min="0" max="99" step="0.1" value="0" inputmode="decimal"></label>
         <label class="check tall"><input type="checkbox" name="couponConfirmed">店員已確認此商品可用券</label>
       </div>
-      <label class="check"><input type="checkbox" name="bought">已購買</label>
 
-      <div class="result" id="editor-result" aria-live="polite"></div>
+      <details class="more" id="editor-more">
+        <summary>更多：品牌、規格備註、照片</summary>
+        <label>品牌<input type="text" name="brand" placeholder="例：On、HOKA、DJI"></label>
+        <label>規格／備註<input type="text" name="note" placeholder="尺寸、顏色、型號、要確認的事"></label>
+        <div class="photo-row">
+          <div class="photo-box" id="photo-box"><span class="photo-empty">＋ 照片</span></div>
+          <div class="photo-actions">
+            <label class="btn small">拍照／選圖<input type="file" id="photo-input" accept="image/*" capture="environment" hidden></label>
+            <button type="button" class="btn small" id="btn-photo-clear">移除照片</button>
+          </div>
+        </div>
+      </details>
+
       <div class="row">
         <button type="button" class="btn primary wide" id="btn-editor-save-bottom">儲存</button>
+      </div>
+      <div class="row">
+        <button type="button" class="btn wide" id="btn-editor-save-next">儲存並新增下一項（沿用店家與日期）</button>
       </div>
       <div class="row">
         <button type="button" class="btn danger" id="btn-editor-delete" hidden>刪除商品</button>
