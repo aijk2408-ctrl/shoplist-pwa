@@ -83,8 +83,9 @@
         <label>本國幣別<input type="text" name="home" maxlength="3" placeholder="TWD"></label>
       </div>
       <label>匯率：1 <span class="local-code">JPY</span> ＝ ? <span class="home-code">TWD</span>
-        <input type="number" name="fx" step="0.0001" min="0.000001" inputmode="decimal" required>
+        <input type="number" name="fx" step="any" min="0" inputmode="decimal" required>
       </label>
+      <p class="hint" id="fx-preview"></p>
       <p class="hint">參考 <a href="https://rate.bot.com.tw/xrt?Lang=zh-TW" target="_blank" rel="noopener">臺銀牌告匯率 ↗</a>（現金或即期賣出）。若填的是刷卡實際匯率，下方手續費請設 0。</p>
       <div class="grid2">
         <label>刷卡手續費 %<input type="number" name="cardFee" step="0.1" min="0" max="20" inputmode="decimal"></label>
@@ -94,6 +95,7 @@
         <label>免稅門檻（未稅，同店同日）<input type="number" name="threshold" step="1" min="0" inputmode="numeric"></label>
         <label>出境日期<input type="date" name="departDate"></label>
       </div>
+      <label class="check"><input type="checkbox" name="refundEnabled" checked>這趟會辦理免稅／退稅（不辦的話全部以含稅價計算）</label>
       <fieldset class="radio-group">
         <legend>退稅方式</legend>
         <label><input type="radio" name="mode" value="refund">出境退稅：店內付含稅價，離境時退稅</label>
@@ -179,7 +181,7 @@
         <label>本國參考價（<span class="home-code">TWD</span>）<input type="number" name="homePrice" min="0" step="1" inputmode="decimal"></label>
         <label>當地含稅標價（<span class="local-code">JPY</span>）<input type="number" name="localPrice" min="0" step="1" inputmode="decimal"></label>
       </div>
-      <label class="check"><input type="checkbox" name="taxFree" checked>可辦免稅／退稅（須符合門市條件）</label>
+      <div id="taxfree-row"><label class="check"><input type="checkbox" name="taxFree" checked>可辦免稅／退稅（須符合門市條件）</label></div>
       <div class="grid2">
         <label>折價券 %<input type="number" name="coupon" min="0" max="99" step="0.1" value="0" inputmode="decimal"></label>
         <label class="check tall"><input type="checkbox" name="couponConfirmed">店員已確認此商品可用券</label>
@@ -187,6 +189,9 @@
       <label class="check"><input type="checkbox" name="bought">已購買</label>
 
       <div class="result" id="editor-result" aria-live="polite"></div>
+      <div class="row">
+        <button type="button" class="btn primary wide" id="btn-editor-save-bottom">儲存</button>
+      </div>
       <div class="row">
         <button type="button" class="btn danger" id="btn-editor-delete" hidden>刪除商品</button>
       </div>
