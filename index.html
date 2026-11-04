@@ -44,6 +44,7 @@
 
     <div class="filters">
       <div class="chips" id="store-chips"></div>
+      <div class="chips" id="buyer-chips"></div>
       <div class="chips" id="brand-chips"></div>
       <div class="chips status-chips">
         <button type="button" class="chip active" data-status="all">全部</button>
@@ -71,6 +72,11 @@
       </div>
       <div class="totals" id="refund-totals"></div>
     </div>
+    <div class="card" id="buyer-card" hidden>
+      <h2>每人小計</h2>
+      <div id="buyer-totals"></div>
+      <p class="hint">依商品上的「買者」統計；出境時同一筆免稅交易的商品要由同一人隨身攜帶。</p>
+    </div>
     <h2 class="section-title">各店各日門檻</h2>
     <p class="hint" id="threshold-hint"></p>
     <div id="refund-groups"></div>
@@ -91,20 +97,28 @@
       <p class="hint" id="country-hint"></p>
       <div class="grid2">
         <label>當地幣別<input type="text" name="local" maxlength="3" placeholder="JPY"></label>
-        <label>本國幣別<input type="text" name="home" maxlength="3" placeholder="TWD"></label>
+        <label>出發地幣別<input type="text" name="home" maxlength="3" placeholder="TWD"></label>
       </div>
       <label>匯率：1 <span class="local-code">JPY</span> ＝ ? <span class="home-code">TWD</span>
         <input type="number" name="fx" step="any" min="0" inputmode="decimal" required>
       </label>
       <p class="hint" id="fx-preview"></p>
-      <p class="hint">參考 <a href="https://rate.bot.com.tw/xrt?Lang=zh-TW" target="_blank" rel="noopener">臺銀牌告匯率 ↗</a>（現金或即期賣出）。若填的是刷卡實際匯率，下方手續費請設 0。</p>
+      <p class="hint" id="fx-link"></p>
       <div class="grid2">
-        <label>刷卡手續費 %<input type="number" name="cardFee" step="0.1" min="0" max="20" inputmode="decimal"></label>
-        <label>消費稅率 %<input type="number" name="taxRate" step="0.1" min="0" max="50" inputmode="decimal"></label>
-      </div>
-      <div class="grid2">
-        <label>免稅門檻（未稅，同店同日）<input type="number" name="threshold" step="1" min="0" inputmode="numeric"></label>
+        <label>預算（<span class="local-code">JPY</span>，選填）<input type="number" name="budget" step="1" min="0" inputmode="numeric" placeholder="例：80000"></label>
         <label>出境日期<input type="date" name="departDate"></label>
+      </div>
+
+      <h3>付款與手續費</h3>
+      <label>預設刷卡手續費 %<input type="number" name="cardFee" step="0.1" min="0" max="20" inputmode="decimal"></label>
+      <p class="hint">台灣多數信用卡海外交易 1.5%。結帳時選當地幣別，不要選本國幣別（DCC），否則會多付 3～5%。</p>
+      <div id="cards-list" class="cards-list"></div>
+      <div class="row"><button type="button" class="btn small" id="btn-card-add">＋ 新增一張卡（不同費率）</button></div>
+
+      <h3>稅與門檻</h3>
+      <div class="grid2">
+        <label>消費稅率 %<input type="number" name="taxRate" step="0.1" min="0" max="50" inputmode="decimal"></label>
+        <label>免稅門檻（未稅，同店同日）<input type="number" name="threshold" step="1" min="0" inputmode="numeric"></label>
       </div>
       <label class="check"><input type="checkbox" name="refundEnabled" checked>這趟會辦理免稅／退稅（不辦的話全部以含稅價計算）</label>
       <fieldset class="radio-group">
@@ -112,6 +126,15 @@
         <label><input type="radio" name="mode" value="refund">出境退稅：店內付含稅價，離境時退稅</label>
         <label><input type="radio" name="mode" value="instant">現場免稅：店內直接付未稅價</label>
       </fieldset>
+      <details class="more">
+        <summary>進階退稅參數（百貨手續費、泰國／歐洲規則）</summary>
+        <div class="grid2">
+          <label>退稅手續費 %（以購買金額計）<input type="number" name="refundFeePct" step="0.01" min="0" max="20" inputmode="decimal" placeholder="例：百貨 1.55"></label>
+          <label>實際退回稅額比例 %<input type="number" name="refundRatio" step="1" min="0" max="100" inputmode="numeric" placeholder="預設 100"></label>
+        </div>
+        <label>全程最低總額（未稅，<span class="local-code">JPY</span>）<input type="number" name="tripMinTotal" step="1" min="0" inputmode="numeric" placeholder="例：泰國 5000，日本填 0"></label>
+        <p class="hint">泰國：同店同日 ฿2,000 且全程 ฿5,000，機場退稅會扣手續費；歐洲 Global Blue 等代理實際退回約六到七成，可用「實際退回比例」表示。</p>
+      </details>
       <div class="row">
         <button type="submit" class="btn primary">儲存設定</button>
       </div>
@@ -130,11 +153,12 @@
       <h2>資料與分享</h2>
       <div class="row wrap">
         <button type="button" class="btn" id="btn-copy-summary">複製清單文字</button>
-        <button type="button" class="btn" id="btn-export">匯出備份檔</button>
+        <button type="button" class="btn" id="btn-share-file">分享備份檔</button>
+        <button type="button" class="btn" id="btn-export">下載備份檔</button>
         <label class="btn file-btn">匯入備份檔<input type="file" id="file-import" accept="application/json,.json" hidden></label>
         <button type="button" class="btn" id="btn-sample">載入沖繩範例</button>
       </div>
-      <p class="hint">資料只存在這支手機的瀏覽器，不會上傳。換手機請用匯出／匯入；要給同行者看，先複製清單文字貼到 LINE。</p>
+      <p class="hint">資料只存在這支手機的瀏覽器，不會上傳。同行者各自用手機勾選後，互相「分享備份檔」再「匯入」並選合併，雙方的新增與已購買都會保留。</p>
     </div>
 
     <div class="card" id="install-card">
@@ -146,6 +170,7 @@
     <div class="card">
       <h2>關於試算</h2>
       <p class="hint">所有金額皆為試算，非官方計算。日本規則依 2026/11/1 起的出境退稅制整理，查核日期 2026/11/3；各店是否可免稅、折價券能否併用，請以店員確認為準。</p>
+      <div class="row"><button type="button" class="btn small" id="btn-onboard-again">重新執行首次設定</button></div>
     </div>
   </section>
 </main>
@@ -176,8 +201,8 @@
           <div class="money-input"><span class="prefix local-sym">¥</span><input type="number" name="localPrice" min="0" step="any" inputmode="decimal" placeholder="店內標籤上的價格"></div>
         </label>
         <label class="check small-check"><input type="checkbox" name="priceIsPretax">標價已不含稅（機場免稅店、店家已扣稅）</label>
-        <label>本國參考價（<span class="home-code">TWD</span>，選填）
-          <div class="money-input"><span class="prefix home-sym">NT$</span><input type="number" name="homePrice" min="0" step="any" inputmode="decimal" placeholder="台灣大概賣多少，想比價再填"></div>
+        <label>出發地參考價（<span class="home-code">TWD</span>，選填）
+          <div class="money-input"><span class="prefix home-sym">NT$</span><input type="number" name="homePrice" min="0" step="any" inputmode="decimal" placeholder="在出發地大概賣多少，想比價再填"></div>
         </label>
       </div>
 
@@ -200,6 +225,12 @@
         <label>購買日期<input type="date" name="date"></label>
         <label class="check tall"><input type="checkbox" name="bought">已購買</label>
       </div>
+      <div class="grid2">
+        <label>買者（誰買、誰帶出境）<input type="text" name="buyer" list="buyer-list" placeholder="例：爸爸、阿姨"></label>
+        <label>付款方式<select name="card" id="card-select"></select></label>
+      </div>
+      <datalist id="buyer-list"></datalist>
+      <div class="chips store-quick" id="buyer-quick"></div>
 
       <div id="taxfree-row"><label class="check"><input type="checkbox" name="taxFree" checked>可辦免稅／退稅（須符合門市條件）</label></div>
       <div class="grid2">
@@ -207,10 +238,25 @@
         <label class="check tall"><input type="checkbox" name="couponConfirmed">店員已確認此商品可用券</label>
       </div>
 
+      <details class="more" id="editor-quotes">
+        <summary>多店比價：其他店家的報價</summary>
+        <div id="quotes-list" class="quotes-list"></div>
+        <div class="quote-add">
+          <input type="text" id="quote-store" list="store-list" placeholder="店家">
+          <input type="number" id="quote-price" min="0" step="any" inputmode="decimal" placeholder="含稅標價">
+          <button type="button" class="btn small" id="btn-quote-add">加入</button>
+        </div>
+        <p class="hint">報價只做比較，不計入合計；按「採用」會把該店與價格換成主要的店家與標價。</p>
+      </details>
+
       <details class="more" id="editor-more">
-        <summary>更多：品牌、規格備註、照片</summary>
+        <summary>更多：品牌、規格備註、第二參考價、照片</summary>
         <label>品牌<input type="text" name="brand" placeholder="例：On、HOKA、DJI"></label>
         <label>規格／備註<input type="text" name="note" placeholder="尺寸、顏色、型號、要確認的事"></label>
+        <div class="grid2">
+          <label>第二參考價（<span class="home-code">TWD</span>）<input type="number" name="altPrice" min="0" step="any" inputmode="decimal" placeholder="例：歐洲價換算"></label>
+          <label>第二參考價標籤<input type="text" name="altLabel" placeholder="例：歐洲、網購"></label>
+        </div>
         <div class="photo-row">
           <div class="photo-box" id="photo-box"><span class="photo-empty">＋ 照片</span></div>
           <div class="photo-actions">
@@ -225,11 +271,45 @@
         <button type="button" class="btn primary wide" id="btn-editor-save-bottom">儲存</button>
       </div>
       <div class="row">
-        <button type="button" class="btn wide" id="btn-editor-save-next">儲存並新增下一項（沿用店家與日期）</button>
+        <button type="button" class="btn wide" id="btn-editor-save-next">儲存並新增下一項（沿用店家、日期、買者）</button>
       </div>
       <div class="row">
         <button type="button" class="btn danger" id="btn-editor-delete" hidden>刪除商品</button>
       </div>
+    </form>
+  </div>
+</div>
+
+<!-- 首次設定 -->
+<div class="sheet" id="onboard" hidden>
+  <div class="sheet-inner">
+    <header class="sheet-head">
+      <span></span>
+      <h2>開始之前</h2>
+      <button type="button" class="link-btn" id="btn-onboard-skip">稍後再說</button>
+    </header>
+    <form id="onboard-form" class="sheet-body" autocomplete="off">
+      <p class="hint">三個問題，之後都可以在設定裡改。</p>
+      <label>你從哪裡出發（比價與換算用的幣別）
+        <select name="home">
+          <option value="TWD">台灣 TWD</option>
+          <option value="HKD">香港 HKD</option>
+          <option value="SGD">新加坡 SGD</option>
+          <option value="MYR">馬來西亞 MYR</option>
+          <option value="USD">美國 USD</option>
+          <option value="OTHER">其他（自行輸入）</option>
+        </select>
+      </label>
+      <label id="onboard-home-other" hidden>幣別代碼<input type="text" name="homeOther" maxlength="3" placeholder="例：EUR"></label>
+      <label>這趟去哪裡
+        <select name="countryKey" id="onboard-country"></select>
+      </label>
+      <label>今天的匯率：1 <span class="ob-local">JPY</span> ＝ ? <span class="ob-home">TWD</span>
+        <input type="number" name="fx" step="any" min="0" inputmode="decimal" placeholder="例：0.2072">
+      </label>
+      <p class="hint" id="onboard-fx-preview">可以先空著，之後清單頁會提醒你填。</p>
+      <label class="check"><input type="checkbox" name="refundEnabled" checked>這趟會辦理免稅／退稅</label>
+      <div class="row"><button type="submit" class="btn primary wide">開始使用</button></div>
     </form>
   </div>
 </div>

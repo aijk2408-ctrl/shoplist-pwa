@@ -127,6 +127,20 @@ form label{display:block;font-size:.86rem;font-weight:700;color:#4a5e5c}
 .small-check{font-size:.82rem;margin-top:6px}
 .store-quick{margin-top:6px}
 .store-quick .chip{font-size:.8rem;padding:5px 10px}
+.cards-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.card-row{display:grid;grid-template-columns:1fr 90px auto;gap:6px;align-items:center}
+.card-row input{margin:0;padding:9px 10px;font-size:.95rem}
+.quotes-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.quote-row{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:8px 10px;border-radius:10px;background:#fff;border:1px solid var(--line);font-size:.9rem}
+.quote-row .small{font-size:.78rem;color:var(--muted);font-weight:500}
+.quote-add{display:grid;grid-template-columns:1fr 110px auto;gap:6px;margin-top:8px}
+.quote-add input{margin:0;padding:9px 10px;font-size:.95rem}
+.buyer-table{display:flex;flex-direction:column;gap:4px}
+.buyer-row{display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;gap:6px;align-items:center;padding:8px 0;border-top:1px solid #efe7d6;font-size:.86rem}
+.buyer-row:first-child{border-top:0}
+.buyer-row .small{display:block;font-size:.76rem;color:var(--muted)}
+.stat.link.bad{background:var(--coral-soft);border-color:#f3c5bd}
+.stat.link.bad .k,.stat.link.bad .v{color:#a3321f}
 details.more{margin-top:14px;border:1px dashed #cfe0db;border-radius:12px;padding:8px 12px}
 details.more summary{font-weight:700;color:var(--sea-dark);cursor:pointer;font-size:.9rem}
 details.more label{margin-top:10px}
