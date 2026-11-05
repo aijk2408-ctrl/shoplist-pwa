@@ -15,10 +15,12 @@ window.SHOPLIST_GUIDES = {
           '同一家店、同一天，未稅合計滿 ¥5,000（一般商品與消耗品合併計算，原本消耗品 ¥50 萬的上限取消）。',
           '購買日起 90 天內出境並完成稅關確認；商品出境時全部隨身可供查驗。以「一張收據」為單位，少一件整張收據都不退。',
           '消耗品不再需要密封包裝，但在日本用掉一件，同一張收據的其他商品也不能退；用掉的要向稅關人員申報。會拆開用的東西（尿布、零食）建議單獨結帳。',
-          '身分條件：非日本居住者，一般為入境 6 個月內的短期停留；購買時出示護照登記。未稅單價 ¥100 萬以上的商品可能被要求出示鑑定書或保證書。'
+          '身分條件：外國籍須入境未滿 6 個月，在留資格或上陸許可為短期滯在、外交、公用、寄港地、通過、船舶觀光、乘員等。打工度假、留學、工作、長住不在官方名單內。',
+          '日本籍須連續住海外 2 年以上並有證明（戶籍附票、在留證明或註記國外轉出的 My Number 卡），且回日未滿 6 個月。',
+          '未稅單價 ¥100 萬以上的商品可能被要求出示鑑定書或保證書。'
         ] },
         { h: '出境時怎麼做', p: [
-          '到機場後、託運與安檢之前，先到國際線出發大廳的「免税手続端末」刷護照；或在同一區連上稅關專用 Wi-Fi（SSID Customs_WiFi_For_TaxRefund，密碼 jcustoms）用 Visit Japan Web 線上辦理。Visit Japan Web 不能在家先辦完，只能先建帳號與登錄護照。',
+          '到機場後、託運與安檢之前，先到國際線出發大廳的「免税手続端末」刷護照；或在同一區連上稅關專用 Wi-Fi（SSID Customs_WiFi_For_TaxRefund，密碼 jcustoms）用 Visit Japan Web 線上辦理（目前只列七個機場）。Visit Japan Web 不能在家先辦完，只能先建帳號與登錄護照。',
           '畫面顯示 GREEN 就完成，去報到；顯示 RED 要帶全部商品到旁邊的稅關檢查處人工查驗。放棄查驗等於沒辦。',
           '只能在出境當天辦；行李託運後或過了出國審查就不能再辦。高單價商品容易被抽查，請預留時間，並由購買者本人攜帶。',
           '確認完成後，退款依「店家指定的方式」進行：信用卡回沖、QR 支付、匯款，或出國審查後到機場的現金退款機或櫃台領日圓。'
@@ -32,6 +34,7 @@ window.SHOPLIST_GUIDES = {
         ] }
       ],
       sources: [
+        { name: '観光庁 免税購入対象者一覧', url: 'https://www.mlit.go.jp/kankocho/tax-free/content/001977885.pdf' },
         { name: '観光庁 旅行者向け特設ページ', url: 'https://www.mlit.go.jp/kankocho/tax-free/page01_000001_00021.html' },
         { name: '観光庁 FAQ', url: 'https://www.mlit.go.jp/kankocho/tax-free/page01_000001_00023.html' },
         { name: '税関 免税制度（リファンド方式）', url: 'https://www.customs.go.jp/kaigairyoko/taxrefund/jpn.htm' },
@@ -46,7 +49,7 @@ window.SHOPLIST_GUIDES = {
       { type: '購物中心、Outlet', examples: 'AEON MALL、PARCO、三井 Outlet、御殿場 Outlet', flow: '多數是各店各自登記免稅，少數商場設統一櫃台；門檻以「同一個免稅登記店」為單位。', refund: '依各店指定。', tips: '同一商場不同店不能合併門檻，除非商場是統一登記。' },
       { type: '機場免稅店（Duty Free）', examples: '出境後管制區內的店', flow: '標價已不含消費稅（部分也免關稅、酒稅），不需要辦免稅手續。', refund: '沒有退稅。', tips: '在 App 的商品勾「標價已不含稅」，就不會算進門檻與退稅。' }
     ],
-    airportsNote: '共通：到機場先辦稅關確認（託運前、安檢前），GREEN 才去報到；現金退款多在出國審查後。端末只能在出境當天用。',
+    airportsNote: '共通：到機場先辦稅關確認（託運前、安檢前），GREEN 才去報到；現金退款多在出國審查後。端末只能在出境當天用。國內線轉機的話，到最後出境的機場才辦，第一段不要託運退稅商品。',
     airports: [
       {
         code: 'NRT', short: '成田', name: '成田機場 NRT', confidence: 'official', checked: '2026-11-04',
@@ -129,6 +132,20 @@ window.SHOPLIST_GUIDES = {
           { name: '税関 端末設置場所', url: 'https://www.customs.go.jp/kaigairyoko/taxrefund/map.htm' },
           { name: '琉球新報', url: 'https://ryukyushimpo.jp/economics/entry-5577184.html' },
           { name: 'Glory Self Tax Refund', url: 'https://www.glory.co.jp/company/news/detail/id=3680' }
+        ]
+      }
+      ,
+      {
+        code: 'CRUISE', short: '郵輪', name: '搭郵輪離開日本', confidence: 'official', confLabel: '規則官方，港口位置未查實', checked: '2026-11-05',
+        steps: ['海外發著的郵輪：在日本最後一個停靠港辦理，要在託運行李與上船手續之前完成', '坐完郵輪再從日本機場回國（Fly & Cruise）：在出境機場辦理，請改看該機場', 'GREEN 就完成；RED 要帶全部商品給稅關查驗'],
+        location: '官方沒有逐港列出位置，部分港口也沒有常設端末。請向船公司或港口人員確認，或洽管轄的稅關。那霸、石垣等港口的實際位置本次未查實。',
+        time: '停靠時間短，建議上船前先問船公司最後一港怎麼辦。',
+        cash: '港口有沒有現金退款未查實。結帳時建議選信用卡回沖，不要選機場現金。',
+        note: 'Visit Japan Web 線上確認目前只列七個機場，港口請用端末或依現場指引。持船舶觀光上陸許可時，購物可能要出示許可書。',
+        sources: [
+          { name: '観光庁 FAQ（郵輪）', url: 'https://www.mlit.go.jp/kankocho/tax-free/page01_000001_00023.html' },
+          { name: '観光庁 免税購入対象者一覧', url: 'https://www.mlit.go.jp/kankocho/tax-free/content/001977885.pdf' },
+          { name: '税関 端末設置場所', url: 'https://www.customs.go.jp/kaigairyoko/taxrefund/map.htm' }
         ]
       }
     ],

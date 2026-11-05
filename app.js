@@ -5,7 +5,7 @@
   const STORAGE_KEY = 'shoplist.v1';
   const DRAFT_KEY = 'shoplist.draft';
   const CORRUPT_KEY = 'shoplist.corrupt';
-  const APP_VERSION = 'v8（2026-11-05）';
+  const APP_VERSION = 'v9（2026-11-05）';
 
   // 國家規則預設值（試算用，非官方；可在設定中覆寫）
   const COUNTRIES = {
@@ -49,8 +49,24 @@
     ]
   };
 
+  // 依観光庁「免税購入対象者一覧（リファンド方式）」整理，查核日期 2026-11-05
+  const ELIGIBILITY_HINT = {
+    tourist: '外國籍、入境未滿 6 個月，在留資格為短期滯在等。購買時要出示護照，並能確認入境日期。',
+    cruise: '船舶觀光上陸許可也在官方名單內，購買時可能要出示許可書。退稅手續在日本最後一個港口辦理。',
+    jp: '要有證明：戶籍附票、在留證明，或註記國外轉出的 My Number 卡，且回日未滿 6 個月。',
+    no: '打工度假、留學、工作、長住不在官方免稅對象名單內，所以這趟全部以含稅價計算。實際請以店家與稅關判定為準。'
+  };
+  function syncEligibility(form, rowSel, hintSel, countryKey) {
+    const isJp = (COUNTRIES[countryKey] || {}).guide === 'JP';
+    $(rowSel).hidden = !isJp;
+    const v = isJp ? form.eligibility.value : 'tourist';
+    $(hintSel).textContent = isJp ? (ELIGIBILITY_HINT[v] || '') : '';
+    form.refundEnabled.disabled = v === 'no';
+    if (v === 'no') form.refundEnabled.checked = false;
+  }
+
   // 沖繩範例（取自原本的行程網站待買清單，價格查核日 2026/10/17）
-  const SAMPLE_TRIP = { name: '沖繩 2026/10', countryKey: 'JP_REFUND', local: 'JPY', home: 'TWD', fx: 0.2072, fxDefault: false, cardFee: 0, taxRate: 10, threshold: 5000, mode: 'refund', refundEnabled: true, departDate: '', onboarded: true };
+  const SAMPLE_TRIP = { name: '範例：沖繩 2026/10', isSample: true, countryKey: 'JP_REFUND', local: 'JPY', home: 'TWD', fx: 0.2072, fxDefault: false, cardFee: 0, taxRate: 10, threshold: 5000, mode: 'refund', refundEnabled: true, departDate: '', onboarded: true };
   const SAMPLE_ITEMS = [
     { brand: 'On', name: 'THE ROGER Advantage', note: '男款 US 8.5／JP 26.5；配色未指定', store: 'Sports Depo 天久店', homePrice: 5280, localPrice: 20900, coupon: 5, buyer: '爸爸' },
     { brand: 'On', name: 'Cloud X 5', note: '男款 US 8.5／JP 26.5；配色未指定', store: 'Sports Depo 天久店', homePrice: 5380, localPrice: 22000, coupon: 5, buyer: '爸爸' },
@@ -234,6 +250,12 @@
   function num(v, d) { const n = parseFloat(v); return Number.isFinite(n) ? n : (d == null ? 0 : d); }
   function normStore(s) { return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
   function itemRate(item, trip) { return item.taxRate != null && item.taxRate !== '' ? num(item.taxRate) : num(trip.taxRate); }
+  // 店家有另外設定就用店家的，否則用旅程預設
+  function refundFeeFor(item, trip) {
+    const s = normStore(item.store);
+    const m = trip.storeFees || {};
+    return s && Object.prototype.hasOwnProperty.call(m, s) ? num(m[s]) : num(trip.refundFeePct);
+  }
   function hasPrice(item) { return item.localPrice != null && item.localPrice !== ''; }
   // 依購買日與出境日判斷退稅資格。block 為 true 時不計退稅；false 只提示
   function dateRule(item, trip) {
@@ -276,7 +298,7 @@
     const eligible = !pretaxPrice && refundOn(trip) && !!item.taxFree && groupOk !== false && rate > 0 && !(dr && dr.block) && !item.consumed;
     // 實際可拿回：稅額 × 退回比例 − 購買金額 × 退稅手續費
     const ratio = trip.refundRatio == null || trip.refundRatio === '' ? 1 : num(trip.refundRatio) / 100;
-    const refundFee = num(trip.refundFeePct) / 100;
+    const refundFee = refundFeeFor(item, trip) / 100;
     const refundAmt = eligible ? Math.max(0, tax * ratio - afterCoupon * refundFee) : 0;
     let pay, refund, net;
     if (eligible && trip.mode === 'instant') { pay = afterCoupon - refundAmt; refund = 0; net = pay; }
@@ -382,6 +404,13 @@
     const netDelta = withC.net - noC.net;
     return { rate, discount, netDelta, homeDelta: withC.home - noC.home, lostRefund: Math.max(0, discount + netDelta) };
   }
+  // 報價不只比標價：用該店價格與可否退稅算出淨成本
+  function quoteNet(item, q, trip, items) {
+    const v = Object.assign({}, item, { store: q.store || item.store, localPrice: num(q.price), taxFree: q.taxFree !== false, priceIsPretax: false, coupon: 0, couponConfirmed: false });
+    const g = groupFor(v, trip, items);
+    const r = calcItem(v, trip, g ? g.ok : true);
+    return { net: r.net, home: r.home };
+  }
   function grossUp(pretax, ratePct) { return pretax * (1 + ratePct / 100); }
   // 同店同日有多張券時，列舉每種用法找最省的。假設每張券可以各自決定用或不用
   function couponPlan(item, trip, items) {
@@ -446,9 +475,34 @@
   let toastTimer = null;
   function toast(msg) {
     const el = $('#toast');
-    el.textContent = msg; el.hidden = false;
+    el.textContent = msg;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.hidden = true; }, 2200);
+    toastTimer = setTimeout(() => { el.textContent = ''; }, 3500);
+  }
+  // 面板開啟時讓背景不可操作，關閉後把焦點還給原本的按鈕
+  const LAYERS = ['viewer', 'coupons', 'onboard', 'editor'];
+  const layerFocus = {};
+  function refreshLayers() {
+    const top = LAYERS.map((id) => $('#' + id)).find((el) => el && !el.hidden) || null;
+    Array.from(document.body.children).forEach((el) => {
+      if (el.tagName === 'SCRIPT') return;
+      el.inert = !!top && el !== top && el.id !== 'toast' && el.id !== 'app-banner';
+    });
+  }
+  function layerOpened(id, focusEl) {
+    layerFocus[id] = document.activeElement;
+    refreshLayers();
+    if (focusEl) focusEl.focus({ preventScroll: true });
+  }
+  function layerClosed(id) {
+    refreshLayers();
+    const el = layerFocus[id];
+    delete layerFocus[id];
+    if (el && document.contains(el) && el.focus) el.focus({ preventScroll: true });
+  }
+  function focusIn(selector) {
+    const el = document.querySelector(selector);
+    if (el) el.focus({ preventScroll: true });
   }
   function setCurrencyLabels(local, home) {
     $$('.local-code').forEach((el) => { el.textContent = local || '當地'; });
@@ -469,8 +523,8 @@
 
   function chipRow(el, values, current, key, allLabel) {
     el.hidden = values.length < 2;
-    el.innerHTML = [`<button type="button" class="chip ${current === 'all' ? 'active' : ''}" data-${key}="all">${allLabel}</button>`]
-      .concat(values.map((v) => `<button type="button" class="chip ${current === normStore(v) ? 'active' : ''}" data-${key}="${esc(normStore(v))}">${esc(v)}</button>`)).join('');
+    el.innerHTML = [`<button type="button" class="chip ${current === 'all' ? 'active' : ''}" aria-pressed="${current === 'all'}" data-${key}="all">${allLabel}</button>`]
+      .concat(values.map((v) => `<button type="button" class="chip ${current === normStore(v) ? 'active' : ''}" aria-pressed="${current === normStore(v)}" data-${key}="${esc(normStore(v))}">${esc(v)}</button>`)).join('');
   }
 
   function renderList(trip) {
@@ -482,6 +536,7 @@
     const left = budget - t.boughtPay;
     // 需要處理的事才放在最上面，其餘收進「更多數字」
     const alerts = [];
+    if (trip.isSample) alerts.push('<div class="alert-line sample"><span>這是範例旅程，不是你的資料。</span><button type="button" class="btn small" data-delete-sample>刪除範例</button></div>');
     if (trip.fxDefault) alerts.push(`<button type="button" class="alert-line" data-goto="fx">⚠ 匯率還是預設值 ${esc(String(trip.fx))}，點此更新 ›</button>`);
     if (t.pending) alerts.push(`<button type="button" class="alert-line" data-show-pending>${t.pending} 項待查價，合計未含，點此查看 ›</button>`);
     if (budget > 0 && used >= 0.9) alerts.push(`<button type="button" class="alert-line ${used >= 1 ? 'bad' : ''}" data-goto="budget">${left >= 0 ? `預算只剩 ${money(left, trip.local)}` : `已超支 ${money(-left, trip.local)}`} ›</button>`);
@@ -509,7 +564,7 @@
     const qf = $('#quick-form');
     if (document.activeElement !== qf.store) qf.store.value = trip.lastStore || '';
     if (document.activeElement !== qf.buyer) qf.buyer.value = trip.lastBuyer || '';
-    $('#quick-hint').textContent = '會記為「已購買、今天」；店家與買者可以直接改，下一筆會沿用。';
+    renderQuickHint();
     qf.price.placeholder = `標價（${sym(trip.local) || trip.local}）`;
     $('#store-list').innerHTML = recentStores(trip).map((s) => `<option value="${esc(s)}">`).join('');
     $('#buyer-list').innerHTML = recentBuyers(trip).map((s) => `<option value="${esc(s)}">`).join('');
@@ -532,7 +587,7 @@
     $('#btn-filter').textContent = `篩選${activeFilters ? `・${activeFilters}` : ''}`;
     $('#btn-filter').classList.toggle('active', activeFilters > 0);
     $('#filter-panel').hidden = !ui.filterOpen || !canFilter;
-    $$('.status-chips .chip').forEach((c) => c.classList.toggle('active', c.dataset.status === ui.status));
+    $$('.status-chips .chip').forEach((c) => { c.classList.toggle('active', c.dataset.status === ui.status); c.setAttribute('aria-pressed', String(c.dataset.status === ui.status)); });
 
     const shown = items.filter((i) =>
       (ui.brand === 'all' || normStore(i.brand) === ui.brand) &&
@@ -608,10 +663,10 @@
       else if (r.feePct > 0) tags.push(`刷卡費 ${r.feePct}%`);
       let quoteLine = '';
       if (it.quotes && it.quotes.length) {
-        const best = it.quotes.slice().sort((a, b) => num(a.price) - num(b.price))[0];
-        const bestPrice = money(num(best.price), trip.local);
-        const quoteText = r.pendingPrice ? `另有 ${it.quotes.length} 家報價，最低 ${bestPrice}`
-          : (num(best.price) < num(it.localPrice) ? `其他店有更便宜的：${best.store || '未填店家'} ${bestPrice}` : `目前採用的是最低價，其他店最低 ${bestPrice}`);
+        const nets = it.quotes.map((q) => Object.assign({ q }, quoteNet(it, q, trip, items))).sort((a, b) => a.home - b.home);
+        const best = nets[0];
+        const quoteText = r.pendingPrice ? `另有 ${it.quotes.length} 家報價，最低淨成本 ${money(best.net, trip.local)}`
+          : (best.home < r.home - 0.5 ? `其他店更划算：${best.q.store || '未填店家'} 淨成本 ${money(best.net, trip.local)}，比目前省 ${money(r.net - best.net, trip.local)}` : `目前這家最划算，其他店淨成本最低 ${money(best.net, trip.local)}`);
         quoteLine = `<span class="unit">${esc(quoteText)}</span>`;
       }
       const unit = r.qty > 1 && !r.pendingPrice ? `<span class="unit">${money(num(it.localPrice), trip.local)} × ${r.qty}</span>` : '';
@@ -619,9 +674,9 @@
       if (r.eligible && r.refund > 0) prices.push(`<span>${it.bought && g && !g.boughtOk ? '買齊後' : '退稅後'} <b>${money(r.home, trip.home)}</b></span>`);
       if (r.homeCompare > 0) prices.push(`<span>出發地 ${money(r.homeCompare, trip.home)}</span>`);
       return `<div class="item ${it.bought ? 'bought' : ''}" data-id="${it.id}">
-        <button type="button" class="buy ${it.bought ? 'on' : ''}" data-buy="${it.id}" aria-pressed="${!!it.bought}" aria-label="已購買">${it.bought ? '✓' : ''}</button>
-        <button type="button" class="item-main" data-open="${it.id}">
-          <div class="thumb">${thumb}</div>
+        <button type="button" class="buy ${it.bought ? 'on' : ''}" data-buy="${it.id}" aria-pressed="${!!it.bought}" aria-label="${esc(it.name)} 已購買">${it.bought ? '✓' : ''}</button>
+        <button type="button" class="item-main" data-open="${it.id}" aria-label="編輯 ${esc(it.name)}，${it.bought ? '已買' : '未買'}，${r.pendingPrice ? '待查價' : `現場 ${money(r.pay, trip.local)}，約 ${money(r.payHome, trip.home)}`}${badge ? `，${r.saving >= 0 ? '省' : '多花'} ${money(Math.abs(r.saving), trip.home)}` : ''}${flag ? `，${esc(flag.replace('⚠ ', ''))}` : ''}">
+          <div class="thumb" aria-hidden="true">${thumb}</div>
           <div>
             ${it.brand ? `<div class="brand">${esc(it.brand)}</div>` : ''}
             <div class="name">${esc(it.name)}${r.qty > 1 ? ` ×${r.qty}` : ''}</div>
@@ -644,7 +699,7 @@
     const items = ui.boughtOnly ? all.filter((i) => i.bought) : all;
     const c = COUNTRIES[trip.countryKey] || COUNTRIES.CUSTOM;
     let modeText;
-    if (!refundOn(trip)) modeText = '這個旅程設定為「不辦退稅」：所有商品以含稅價計算。若會辦退稅，請到設定開啟。';
+    if (!refundOn(trip)) modeText = trip.eligibility === 'no' ? '你選的身分不在官方免稅對象名單內，所以全部以含稅價計算。身分若不同，可以到設定修改。' : '這個旅程設定為「不辦退稅」：所有商品以含稅價計算。若會辦退稅，請到設定開啟。';
     else if (trip.mode === 'refund') modeText = '這個旅程採「出境退稅」：店內付含稅價，離境時依規定退稅。下方的「預計退稅」是你出境後應拿回的金額。';
     else modeText = '這個旅程採「現場免稅」：達門檻的店家直接付未稅價，沒有額外退稅步驟。';
     let dateHint = '';
@@ -701,6 +756,7 @@
           <div><span>預計退稅</span><b>${money(g.refund, trip.local)}</b></div>
         </div>
         <div class="g-items">${esc(g.items.map((i) => (i.bought ? '✓ ' : '') + [i.brand, i.name].filter(Boolean).join(' ')).join('、'))}</div>
+        ${refundOn(trip) && trip.mode === 'refund' ? `<label class="g-fee">這家店的退稅手續費 %<input type="number" min="0" max="20" step="any" inputmode="decimal" data-store-fee="${esc(normStore(g.store))}" value="${(trip.storeFees || {})[normStore(g.store)] != null ? esc(String(trip.storeFees[normStore(g.store)])) : ''}" placeholder="${esc(String(num(trip.refundFeePct)))}"></label>` : ''}
         ${g.pendingCount ? `<p class="hint">另有 ${g.pendingCount} 項待查價，未計入上面的金額。</p>` : ''}
         ${g.receiptBlocked ? '<p class="g-warn">⚠ 用掉一件，同一張收據的其他商品也不能退。把拆用的東西單獨結帳可以保住。</p>' : ''}
         ${groupPlan && groupPlan.current.home - groupPlan.best.home > 0.5 ? (groupPlan.members.some((m) => m.couponConfirmed && !groupPlan.uses(m.id)) ? `<p class="g-warn">⚠ ${esc(planText(groupPlan, trip))}</p>` : `<p class="hint">${esc(planText(groupPlan, trip))}</p>`) : ''}
@@ -759,9 +815,10 @@
       if (!list.length) body += '<p class="hint">機場資訊整理中。</p>';
       else {
         if (g.airportsNote) body += `<p class="hint">${esc(g.airportsNote)}</p>`;
-        const cur = list.find((a) => a.code === trip.airport) || list[0];
-        body += `<div class="chips">${list.map((a) => `<button type="button" class="chip ${a.code === cur.code ? 'active' : ''}" data-guide-airport="${esc(a.code)}">${esc(a.short || a.code)}</button>`).join('')}</div>`;
-        const conf = cur.confidence === 'official' ? '<span class="conf official">官方已公布</span>' : (cur.confidence === 'media' ? '<span class="conf">媒體轉述</span>' : '<span class="conf">尚未公布</span>');
+        const cur = list.find((a) => a.code === trip.airport) || null;
+        body += `<div class="chips wrap">${list.map((a) => `<button type="button" class="chip ${cur && a.code === cur.code ? 'active' : ''}" aria-pressed="${!!(cur && a.code === cur.code)}" data-guide-airport="${esc(a.code)}">${esc(a.short || a.code)}</button>`).join('')}</div>`;
+        if (!cur) { body += '<p class="hint">先選你從哪裡離開日本，這裡會顯示該處的流程與位置。</p>'; $('#guide-body').innerHTML = body; return; }
+        const conf = cur.confLabel ? `<span class="conf">${esc(cur.confLabel)}</span>` : cur.confidence === 'official' ? '<span class="conf official">官方已公布</span>' : (cur.confidence === 'media' ? '<span class="conf">媒體轉述</span>' : '<span class="conf">尚未公布</span>');
         body += `<div class="guide-section"><h3>${esc(cur.name)} ${conf}</h3>
           ${cur.steps && cur.steps.length ? `<p><b>流程</b></p><ul>${cur.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : ''}
           ${cur.location ? `<p><b>位置</b>：${esc(cur.location)}</p>` : ''}
@@ -769,7 +826,7 @@
           ${cur.cash ? `<p><b>現金退款</b>：${esc(cur.cash)}</p>` : ''}
           ${cur.note ? `<p class="hint">${esc(cur.note)}</p>` : ''}
           ${srcs(cur.sources)}<div class="guide-src">查證日期 ${esc(cur.checked || g.checked)}</div></div>`;
-        if (!trip.airport) body += '<p class="hint">在設定頁選「出境機場」後，這裡會固定顯示你的機場。</p>';
+        if (cur.confidence === 'media') body += '<p class="hint">「媒體轉述」表示官方沒有公布細節，資訊來自媒體報導，到場請以現場指標為準。</p>';
       }
     } else if (sec === 'coupons') {
       const c = g.coupons || { groups: [] };
@@ -795,15 +852,16 @@
     $('#store-list').innerHTML = recentStores(trip).map((s) => `<option value="${esc(s)}">`).join('');
     renderCouponPhoto(); renderCoupons(trip);
     $('#coupons').hidden = false; document.body.style.overflow = 'hidden';
+    layerOpened('coupons', $('#coupons h2'));
   }
-  function closeCoupons() { $('#coupons').hidden = true; if ($('#editor').hidden) document.body.style.overflow = ''; renderAll(); if (!$('#editor').hidden) renderStoreCouponNote(); }
+  function closeCoupons() { $('#coupons').hidden = true; if ($('#editor').hidden) document.body.style.overflow = ''; renderAll(); if (!$('#editor').hidden) renderStoreCouponNote(); layerClosed('coupons'); }
   function renderCouponPhoto() {
     $('#coupon-photo-box').innerHTML = ui.couponPhoto ? `<img src="${ui.couponPhoto}" alt="券圖">` : '<span class="photo-empty">＋ 券圖</span>';
   }
   function renderCoupons(trip) {
     const list = (trip.coupons || []).slice().sort((a, b) => (couponExpired(a) ? 1 : 0) - (couponExpired(b) ? 1 : 0) || (a.store || '').localeCompare(b.store || ''));
     $('#coupon-list').innerHTML = list.length ? list.map((c) => `<div class="coupon-row ${couponExpired(c) ? 'expired' : ''}">
-      ${c.photo ? `<img src="${c.photo}" alt="" data-view="${esc(c.id)}">` : '<div class="no-img">🎫</div>'}
+      ${c.photo ? `<button type="button" class="img-btn" data-view="${esc(c.id)}" aria-label="放大 ${esc(c.title || c.store || '券')}"><img src="${c.photo}" alt=""></button>` : '<div class="no-img" aria-hidden="true">🎫</div>'}
       <div><div class="c-title">${esc(c.title || '未命名的券')}</div><div class="c-meta">${esc(c.store || '未綁定店家')}${c.expires ? `・到 ${esc(c.expires)}${couponExpired(c) ? '（已過期）' : ''}` : ''}${c.note ? `・${esc(c.note)}` : ''}</div></div>
       <div class="c-actions"><button type="button" class="btn small" data-coupon-edit="${esc(c.id)}">編輯</button><button type="button" class="btn small danger" data-coupon-del="${esc(c.id)}">刪除</button></div>
     </div>`).join('') : '<p class="hint">還沒有券。</p>';
@@ -833,8 +891,13 @@
     if (!save()) { renderCoupons(currentTrip()); return; }
     renderCoupons(trip); toast('已刪除');
   }
-  function openViewer(src) { $('#viewer-img').src = src; $('#viewer').hidden = false; }
-  function closeViewer() { $('#viewer').hidden = true; $('#viewer-img').src = ''; }
+  function openViewer(src, label) {
+    $('#viewer-img').src = src;
+    $('#viewer-img').alt = label ? `${label} 的券圖` : '券圖放大';
+    $('#viewer').hidden = false;
+    layerOpened('viewer', $('#btn-viewer-close'));
+  }
+  function closeViewer() { $('#viewer').hidden = true; $('#viewer-img').src = ''; layerClosed('viewer'); }
   function renderStoreCouponNote() {
     const trip = currentTrip();
     const store = $('#item-form').store.value;
@@ -843,7 +906,7 @@
     box.hidden = !cps.length;
     if (!cps.length) return;
     box.innerHTML = `🎫 這家店你有 ${cps.length} 張券，結帳前出示：${esc(cps.map((c) => c.title || '未命名').join('、'))}
-      <div class="thumbs">${cps.filter((c) => c.photo).map((c) => `<img src="${c.photo}" alt="" data-view="${esc(c.id)}">`).join('')}<button type="button" class="btn small" data-open-coupons>看券</button></div>`;
+      <div class="thumbs">${cps.filter((c) => c.photo).map((c) => `<button type="button" class="img-btn" data-view="${esc(c.id)}" aria-label="放大 ${esc(c.title || c.store || '券')}"><img src="${c.photo}" alt=""></button>`).join('')}<button type="button" class="btn small" data-open-coupons>看券</button></div>`;
   }
 
   function renderSettings(trip) {
@@ -863,6 +926,8 @@
     form.threshold.value = trip.threshold;
     form.departDate.value = trip.departDate || '';
     form.refundEnabled.checked = refundOn(trip);
+    form.eligibility.value = trip.eligibility || 'tourist';
+    syncEligibility(form, '#eligibility-row', '#eligibility-hint', form.countryKey.value);
     form.refundFeePct.value = num(trip.refundFeePct) > 0 ? trip.refundFeePct : '';
     form.refundRatio.value = trip.refundRatio != null && trip.refundRatio !== '' && num(trip.refundRatio) !== 100 ? trip.refundRatio : '';
     form.tripMinTotal.value = num(trip.tripMinTotal) > 0 ? trip.tripMinTotal : '';
@@ -952,9 +1017,11 @@
     form.countryKey.value = trip.countryKey && trip.countryKey !== 'JP_OLD' ? trip.countryKey : 'JP_REFUND';
     form.fx.value = trip.fxDefault ? '' : trip.fx;
     form.refundEnabled.checked = refundOn(trip);
+    form.eligibility.value = trip.eligibility || 'tourist';
     renderOnboardPreview();
     $('#onboard').hidden = false;
     document.body.style.overflow = 'hidden';
+    layerOpened('onboard', $('#onboard h2'));
   }
   function onboardHome() {
     const form = $('#onboard-form');
@@ -967,6 +1034,7 @@
     $$('.ob-local').forEach((el) => { el.textContent = local; });
     $$('.ob-home').forEach((el) => { el.textContent = onboardHome(); });
     $('#onboard-home-other').hidden = form.home.value !== 'OTHER';
+    syncEligibility(form, '#onboard-eligibility-row', '#onboard-eligibility-hint', form.countryKey.value);
     const fx = num(form.fx.value);
     const box = $('#onboard-fx-preview');
     if (!(fx > 0)) { box.className = 'hint'; box.textContent = '可以先空著，之後清單頁會提醒你填。'; return; }
@@ -986,10 +1054,13 @@
       const fx = num(form.fx.value);
       if (fx > 0) { trip.fx = fx; trip.fxDefault = false; }
       trip.refundEnabled = form.refundEnabled.checked;
+      trip.eligibility = c.guide === 'JP' ? form.eligibility.value : 'tourist';
+      if (trip.eligibility === 'cruise') trip.airport = 'CRUISE';
     }
     trip.onboarded = true;
     save();
     $('#onboard').hidden = true; document.body.style.overflow = '';
+    layerClosed('onboard');
     renderAll();
     if (apply && lastSaved === JSON.stringify(state)) toast('設定完成');
   }
@@ -1079,6 +1150,7 @@
     renderEditorResult();
     $('#editor').hidden = false;
     document.body.style.overflow = 'hidden';
+    layerOpened('editor', item ? $('#editor-title') : null);
     $('#editor .sheet-body').scrollTop = 0;
     setTimeout(() => { if (!item) form.name.focus(); }, 50);
   }
@@ -1096,12 +1168,17 @@
   }
   function renderQuotes(trip) {
     const box = $('#quotes-list');
-    const main = num($('#item-form').localPrice.value);
-    box.innerHTML = ui.editorQuotes.length ? ui.editorQuotes.map((q, i) => {
-      const p = num(q.price);
-      const diff = main > 0 && p > 0 ? p - main : null;
-      return `<div class="quote-row"><div><b>${esc(q.store || '未填店家')}</b><span class="small">${diff == null ? '' : (diff < 0 ? ` 便宜 ${money(-diff, trip.local)}` : (diff > 0 ? ` 貴 ${money(diff, trip.local)}` : ' 同價'))}</span></div><div>${money(p, trip.local)}</div><div><button type="button" class="btn small" data-quote-use="${i}">採用</button> <button type="button" class="btn small danger" data-quote-del="${i}">刪</button></div></div>`;
-    }).join('') : '<p class="hint">還沒有其他店的報價。</p>';
+    if (!ui.editorQuotes.length) { box.innerHTML = '<p class="hint">還沒有其他店的報價。</p>'; return; }
+    const item = formToItem();
+    const items = tripItems(trip);
+    const g = groupFor(item, trip, items);
+    const cur = hasPrice(item) ? calcItem(item, trip, g ? g.ok : true) : null;
+    box.innerHTML = ui.editorQuotes.map((q, i) => {
+      const n = quoteNet(item, q, trip, items);
+      const diff = cur ? n.net - cur.net : null;
+      const note = diff == null ? '' : (diff < -0.5 ? `，比目前省 ${money(-diff, trip.local)}` : (diff > 0.5 ? `，比目前貴 ${money(diff, trip.local)}` : '，和目前差不多'));
+      return `<div class="quote-row"><div><b>${esc(q.store || '未填店家')}</b><span class="small">標價 ${money(num(q.price), trip.local)}・${q.taxFree === false ? '不可退稅' : '可退稅'}${note}</span></div><div>${money(n.net, trip.local)}</div><div><button type="button" class="btn small" data-quote-use="${i}">採用</button> <button type="button" class="btn small danger" data-quote-del="${i}">刪</button></div></div>`;
+    }).join('');
   }
   function renderTaxRows(trip) {
     const form = $('#item-form');
@@ -1116,6 +1193,7 @@
     }
     clearDraft();
     $('#editor').hidden = true; document.body.style.overflow = '';
+    layerClosed('editor');
     return true;
   }
 
@@ -1134,7 +1212,7 @@
       homePrice: num(form.homePrice.value), localPrice: form.localPrice.value.trim() === '' ? null : num(form.localPrice.value), altPrice: num(form.altPrice.value), altLabel: form.altLabel.value.trim(),
       taxFree: form.taxFree.checked, taxRate: form.taxRate.value === '' ? null : num(form.taxRate.value), priceIsPretax: form.priceIsPretax.checked, consumed: form.consumed.checked, consumedSeparate: form.consumedSeparate.checked,
       coupon: num(form.coupon.value), couponConfirmed: form.couponConfirmed.checked, bought: form.bought.checked, photo: ui.editorPhoto,
-      quotes: ui.editorQuotes.map((q) => ({ store: (q.store || '').trim(), price: num(q.price), date: q.date || '' })), updatedAt: Date.now()
+      quotes: ui.editorQuotes.map((q) => ({ store: (q.store || '').trim(), price: num(q.price), date: q.date || '', taxFree: q.taxFree !== false })), updatedAt: Date.now()
     }));
   }
 
@@ -1257,10 +1335,18 @@
     if (save()) {
       closeEditor(true); renderAll();
       if (andNext) { ui.prefill = { store: item.store, date: item.date, buyer: item.buyer }; toast('已加入，接著填下一項'); openEditor(null); }
-      else toast(idx >= 0 ? '已更新' : '已加入清單');
+      else {
+        toast(idx >= 0 ? '已更新' : '已加入清單');
+        focusIn(`[data-open="${CSS.escape(item.id)}"]`);
+      }
     }
   }
 
+  function renderQuickHint() {
+    $('#quick-hint').textContent = $('#quick-form').bought.checked
+      ? '會記為「已購買、今天」；店家與買者可以直接改，下一筆會沿用。'
+      : '會記為「未買」，列入清單；店家與買者可以直接改，下一筆會沿用。';
+  }
   function quickAdd(e) {
     e.preventDefault();
     const form = $('#quick-form');
@@ -1274,12 +1360,14 @@
     const buyer = form.buyer.value.trim();
     trip.lastStore = store;
     trip.lastBuyer = buyer;
-    const item = newItem(trip.id, { name, localPrice: price, store, buyer, date: today(), bought: true, taxFree: refundOn(trip) });
+    const bought = form.bought.checked;
+    const item = newItem(trip.id, { name, localPrice: price, store, buyer, date: bought ? today() : '', bought, taxFree: refundOn(trip) });
     state.items.push(item);
     if (save()) {
       form.reset(); renderAll();
-      form.store.value = store; form.buyer.value = buyer;
-      toast(price == null ? `已記下「${name}」，價格待查` : `已記下「${name}」`);
+      form.store.value = store; form.buyer.value = buyer; form.bought.checked = bought;
+      renderQuickHint();
+      toast(`已記下「${name}」${bought ? '' : '，列入未買'}${price == null ? '，價格待查' : ''}`);
       form.name.focus();
     }
   }
@@ -1333,7 +1421,8 @@
     trip.taxRate = num(form.taxRate.value);
     trip.threshold = num(form.threshold.value);
     trip.departDate = form.departDate.value;
-    trip.airport = form.airport.value || '';
+    trip.eligibility = form.eligibility.value;
+    trip.airport = form.airport.value || (trip.eligibility === 'cruise' ? 'CRUISE' : '');
     trip.refundEnabled = form.refundEnabled.checked;
     trip.mode = form.mode.value === 'instant' ? 'instant' : 'refund';
     trip.refundFeePct = num(form.refundFeePct.value);
@@ -1385,14 +1474,27 @@
   function switchTrip(id) { state.currentTripId = id; ui.store = 'all'; ui.brand = 'all'; ui.buyer = 'all'; save(); renderAll(); }
 
   function loadSample() {
-    const n = state.items.length;
-    const msg = n ? '另外建立一個「沖繩 2026/10」範例旅程？（不會影響現有資料）' : '載入「沖繩 2026/10」範例旅程？';
-    if (!confirm(msg)) return;
+    const existing = state.trips.find((t) => t.isSample);
+    if (existing) { switchTrip(existing.id); showTab('list'); toast('已切到範例旅程'); return; }
+    if (!confirm('載入範例旅程？它是獨立的旅程，不會影響你的資料，看完可以一鍵刪除。')) return;
     const t = newTrip(Object.assign({}, SAMPLE_TRIP));
     state.trips.push(t); state.currentTripId = t.id;
     SAMPLE_ITEMS.forEach((s) => state.items.push(newItem(t.id, s)));
     if (!save()) return;
     renderAll(); showTab('list'); toast('已載入範例');
+  }
+  function deleteSample() {
+    const trip = currentTrip();
+    if (!trip.isSample || !confirm('刪除範例旅程？你自己的旅程不受影響。')) return;
+    markDeleted(trip.id);
+    state.items.filter((i) => i.tripId === trip.id).forEach((i) => markDeleted(i.id));
+    state.items = state.items.filter((i) => i.tripId !== trip.id);
+    state.trips = state.trips.filter((t) => t.id !== trip.id);
+    if (!state.trips.length) state.trips.push(newTrip({ name: '我的旅程' }));
+    state.currentTripId = state.trips[0].id;
+    if (!save()) return;
+    renderAll(); toast('已刪除範例');
+    if (!currentTrip().onboarded && !tripItems(currentTrip()).length) openOnboard();
   }
 
   // ---------- 匯出／匯入／分享 ----------
@@ -1530,7 +1632,7 @@
   function showTab(name) {
     ui.tab = name;
     $$('.view').forEach((v) => { v.hidden = v.dataset.view !== name; });
-    $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+    $$('.tab').forEach((t) => { t.classList.toggle('active', t.dataset.tab === name); if (t.dataset.tab === name) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current'); });
     $('#btn-add').hidden = name !== 'list';
     window.scrollTo({ top: 0 });
   }
@@ -1548,12 +1650,14 @@
     $('#btn-sample').addEventListener('click', loadSample);
     $('#btn-trip-switch').addEventListener('click', () => { showTab('settings'); $('#trip-list').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
     ['#summary', '#summary-more'].forEach((sel) => $(sel).addEventListener('click', (e) => {
+      if (e.target.closest('[data-delete-sample]')) { deleteSample(); return; }
       if (e.target.closest('[data-show-pending]')) { ui.status = 'pending'; renderList(currentTrip()); return; }
       const b = e.target.closest('[data-goto]');
       if (b) gotoSetting(b.dataset.goto);
     }));
     $('#btn-more').addEventListener('click', () => { ui.moreOpen = !ui.moreOpen; renderList(currentTrip()); });
     $('#btn-filter').addEventListener('click', () => { ui.filterOpen = !ui.filterOpen; renderList(currentTrip()); });
+    $('#quick-form').bought.addEventListener('change', renderQuickHint);
     $('#quick-form').addEventListener('focusin', () => $('#quick-form').classList.add('open'));
     document.addEventListener('click', (e) => { if (!e.target.closest('#quick-form')) $('#quick-form').classList.remove('open'); });
     $('#btn-banner-close').addEventListener('click', () => { $('#app-banner').hidden = true; });
@@ -1575,6 +1679,7 @@
           if (it.bought && !it.date) it.date = today();
           stampChanges(it, prev);
           save(); renderAll();
+          focusIn(`[data-buy="${CSS.escape(it.id)}"]`);
         }
         return;
       }
@@ -1612,19 +1717,25 @@
     $('#btn-coupon-photo-clear').addEventListener('click', () => { ui.couponPhoto = null; renderCouponPhoto(); });
     $('#coupon-list').addEventListener('click', (e) => {
       const ed = e.target.closest('[data-coupon-edit]'); const del = e.target.closest('[data-coupon-del]'); const v = e.target.closest('[data-view]');
-      if (ed) editCoupon(ed.dataset.couponEdit); else if (del) deleteCoupon(del.dataset.couponDel); else if (v) openViewer(v.src);
+      if (ed) editCoupon(ed.dataset.couponEdit); else if (del) deleteCoupon(del.dataset.couponDel); else if (v) openViewer(v.querySelector('img').src, v.getAttribute('aria-label').replace('放大 ', ''));
     });
     document.addEventListener('click', (e) => {
       const oc = e.target.closest('[data-open-coupons]');
       if (oc) { openCoupons($('#editor').hidden ? '' : $('#item-form').store.value); return; }
       const v = e.target.closest('#store-coupon-note [data-view]');
-      if (v) openViewer(v.src);
+      if (v) openViewer(v.querySelector('img').src, v.getAttribute('aria-label').replace('放大 ', ''));
       const gt = e.target.closest('[data-guide-tab]');
       if (gt) { ui.guideTab = gt.dataset.guideTab; renderGuide(currentTrip()); $('#guide-card').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
       const ga = e.target.closest('[data-guide-airport]');
       if (ga) { const t = currentTrip(); t.airport = ga.dataset.guideAirport; save(); renderGuide(t); renderAirportSelect(t); }
     });
     $('#viewer').addEventListener('click', closeViewer);
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (!$('#viewer').hidden) closeViewer();
+      else if (!$('#coupons').hidden) closeCoupons();
+      else if (!$('#editor').hidden) closeEditor(false);
+    });
     $('#buyer-quick').addEventListener('click', (e) => {
       const b = e.target.closest('[data-pick-buyer]');
       if (b) { $('#item-form').buyer.value = b.dataset.pickBuyer; renderEditorResult(); saveDraft(); }
@@ -1632,8 +1743,8 @@
     $('#btn-quote-add').addEventListener('click', () => {
       const s = $('#quote-store').value.trim(); const p = num($('#quote-price').value);
       if (!(p > 0)) { $('#quote-price').focus(); toast('請填報價'); return; }
-      ui.editorQuotes.push({ store: s, price: p, date: today() });
-      $('#quote-store').value = ''; $('#quote-price').value = '';
+      ui.editorQuotes.push({ store: s, price: p, date: today(), taxFree: $('#quote-taxfree').checked });
+      $('#quote-store').value = ''; $('#quote-price').value = ''; $('#quote-taxfree').checked = true;
       renderQuotes(currentTrip()); saveDraft();
     });
     $('#quotes-list').addEventListener('click', (e) => {
@@ -1642,9 +1753,10 @@
       if (use) {
         const i = +use.dataset.quoteUse; const q = ui.editorQuotes[i]; if (!q) return;
         const prevStore = form.store.value.trim(), prevPrice = num(form.localPrice.value);
-        form.store.value = q.store; form.localPrice.value = q.price;
+        const prevTaxFree = form.taxFree.checked;
+        form.store.value = q.store; form.localPrice.value = q.price; form.taxFree.checked = q.taxFree !== false;
         ui.editorQuotes.splice(i, 1);
-        if (prevPrice > 0) ui.editorQuotes.push({ store: prevStore, price: prevPrice, date: today() });
+        if (prevPrice > 0) ui.editorQuotes.push({ store: prevStore, price: prevPrice, date: today(), taxFree: prevTaxFree });
         renderEditorResult(); saveDraft(); toast(`已改用 ${q.store || '該店'} 的報價`);
       } else if (del) { ui.editorQuotes.splice(+del.dataset.quoteDel, 1); renderQuotes(currentTrip()); saveDraft(); }
     });
@@ -1655,6 +1767,17 @@
     $('#editor').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeEditor(false); });
 
     // 退稅
+    $('#refund-groups').addEventListener('change', (e) => {
+      const key = e.target.dataset && e.target.dataset.storeFee;
+      if (key == null) return;
+      const trip = currentTrip();
+      const raw = e.target.value.trim();
+      const v = Number(raw);
+      if (raw !== '' && (!Number.isFinite(v) || v < 0 || v > 20)) { toast('手續費要介於 0 到 20%'); renderRefund(trip); return; }
+      trip.storeFees = trip.storeFees || {};
+      if (raw === '') delete trip.storeFees[key]; else trip.storeFees[key] = v;
+      if (save()) { renderAll(); toast('已更新這家店的手續費'); }
+    });
     $('#refund-bought-only').addEventListener('change', (e) => { ui.boughtOnly = e.target.checked; renderRefund(currentTrip()); });
     $('#checklist').addEventListener('change', (e) => {
       const i = e.target.dataset.check; if (i == null) return;
@@ -1663,7 +1786,8 @@
 
     // 設定
     $('#trip-form').addEventListener('submit', saveTripForm);
-    $('#country-select').addEventListener('change', (e) => applyCountryPreset(e.target.value));
+    $('#country-select').addEventListener('change', (e) => { applyCountryPreset(e.target.value); syncEligibility($('#trip-form'), '#eligibility-row', '#eligibility-hint', e.target.value); });
+    $('#trip-form').eligibility.addEventListener('change', () => syncEligibility($('#trip-form'), '#eligibility-row', '#eligibility-hint', $('#trip-form').countryKey.value));
     $('#trip-form').fx.addEventListener('input', renderFxPreview);
     $('#trip-form').local.addEventListener('input', (e) => { $$('.local-code').forEach((el) => { el.textContent = e.target.value.toUpperCase() || '當地'; }); renderFxPreview(); });
     $('#trip-form').home.addEventListener('input', (e) => { $$('.home-code').forEach((el) => { el.textContent = e.target.value.toUpperCase() || '出發地'; }); renderFxPreview(); });
@@ -1711,6 +1835,8 @@
     openOnboard();
   }
   if ('serviceWorker' in navigator) {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) toast('新版已下載，下次開啟 App 就會使用'); });
     window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => { /* 非安全環境或不支援時略過 */ }); });
   }
 })();

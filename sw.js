@@ -1,5 +1,5 @@
-/* 出國購物清單 PWA service worker：快取 App 外殼，離線可開啟 */
-const VERSION = 'shoplist-v8';
+/* 出國購物清單 PWA service worker：快取 App 外殼，離線與弱網都能立刻開啟 */
+const VERSION = 'shoplist-v9';
 const SHELL = [
   './',
   './index.html',
@@ -13,8 +13,13 @@ const SHELL = [
   './icons/apple-touch-icon.png'
 ];
 
+// 整包一次下載成功才換版，不會有新舊檔案混用
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches.open(VERSION)
+      .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -25,17 +30,19 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// 快取優先：訊號再差也不用等網路。外殼更新靠 VERSION 換版
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  // 先網路、失敗用快取：有網路時拿最新版，離線時仍可開啟
   event.respondWith(
-    fetch(req).then((res) => {
-      const copy = res.clone();
-      caches.open(VERSION).then((c) => c.put(req, copy));
-      return res;
-    }).catch(() => caches.match(req, { ignoreSearch: true }).then((hit) => hit || caches.match('./index.html')))
+    caches.open(VERSION).then((c) => c.match(req, { ignoreSearch: true }).then((hit) => {
+      if (hit) return hit;
+      return fetch(req).then((res) => {
+        if (res.ok && res.type === 'basic') c.put(req, res.clone());
+        return res;
+      }).catch(() => (req.mode === 'navigate' ? c.match('./index.html') : Response.error()));
+    }))
   );
 });

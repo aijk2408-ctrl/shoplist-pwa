@@ -57,6 +57,7 @@
         <input type="text" name="store" list="store-list" placeholder="店家" aria-label="店家">
         <input type="text" name="buyer" list="buyer-list" placeholder="買者" aria-label="買者">
       </div>
+      <label class="check small-check quick-bought"><input type="checkbox" name="bought" checked>已經買了（取消就記成未買）</label>
       <p class="hint" id="quick-hint"></p>
     </form>
 
@@ -121,6 +122,15 @@
         <select name="countryKey" id="country-select"></select>
       </label>
       <p class="hint" id="country-hint"></p>
+      <label id="eligibility-row">你在日本的身分
+        <select name="eligibility">
+          <option value="tourist">短期觀光或商務，入境未滿 6 個月</option>
+          <option value="cruise">搭郵輪，下船觀光</option>
+          <option value="jp">日本籍，住海外 2 年以上</option>
+          <option value="no">打工度假、留學、工作或長住</option>
+        </select>
+      </label>
+      <p class="hint" id="eligibility-hint"></p>
       <div class="grid2">
         <label>當地幣別<input type="text" name="local" maxlength="3" placeholder="JPY"></label>
         <label>出發地幣別<input type="text" name="home" maxlength="3" placeholder="TWD"></label>
@@ -134,7 +144,7 @@
         <label>預算（<span class="local-code">JPY</span>，選填）<input type="number" name="budget" step="1" min="0" inputmode="numeric" placeholder="例：80000"></label>
         <label>出境日期<input type="date" name="departDate"></label>
       </div>
-      <label id="airport-row">出境機場（退稅指引會依此顯示）<select name="airport" id="airport-select"></select></label>
+      <label id="airport-row">從哪裡離開日本（退稅指引會依此顯示）<select name="airport" id="airport-select"></select></label>
 
       <h3>付款與手續費</h3>
       <label>預設刷卡手續費 %<input type="number" name="cardFee" step="any" min="0" max="20" inputmode="decimal"></label>
@@ -156,11 +166,11 @@
       <details class="more">
         <summary>進階退稅參數（百貨手續費、泰國／歐洲規則）</summary>
         <div class="grid2">
-          <label>退稅手續費 %（以購買金額計）<input type="number" name="refundFeePct" step="any" min="0" max="20" inputmode="decimal" placeholder="例：百貨 1.55"></label>
+          <label>預設退稅手續費 %（以購買金額計）<input type="number" name="refundFeePct" step="any" min="0" max="20" inputmode="decimal" placeholder="例：百貨 1.55"></label>
           <label>實際退回稅額比例 %<input type="number" name="refundRatio" step="1" min="0" max="100" inputmode="numeric" placeholder="預設 100"></label>
         </div>
         <label>全程最低總額（未稅，<span class="local-code">JPY</span>）<input type="number" name="tripMinTotal" step="1" min="0" inputmode="numeric" placeholder="例：泰國 5000，日本填 0"></label>
-        <p class="hint">泰國：同店同日 ฿2,000 且全程 ฿5,000，機場退稅會扣手續費；歐洲 Global Blue 等代理實際退回約六到七成，可用「實際退回比例」表示。</p>
+        <p class="hint">泰國：同店同日 ฿2,000 且全程 ฿5,000，機場退稅會扣手續費。個別店家的手續費可以在退稅頁各店區塊修改。歐洲 Global Blue 等代理實際退回約六到七成，可用「實際退回比例」表示。</p>
       </details>
       <div class="row">
         <button type="submit" class="btn primary">儲存設定</button>
@@ -182,7 +192,7 @@
         <button type="button" class="btn" id="btn-copy-summary">複製清單文字</button>
         <button type="button" class="btn" id="btn-share-file">分享備份檔</button>
         <button type="button" class="btn" id="btn-export">下載備份檔</button>
-        <label class="btn file-btn">匯入備份檔<input type="file" id="file-import" accept="application/json,.json" hidden></label>
+        <label class="btn file-btn">匯入備份檔<input type="file" id="file-import" accept="application/json,.json" class="sr-only"></label>
         <button type="button" class="btn" id="btn-sample">載入沖繩範例</button>
       </div>
       <p class="hint">資料只存在這支手機的瀏覽器，不會上傳。同行者各自用手機勾選後，互相「分享備份檔」再「匯入」並選合併：雙方新增的商品都保留，同一商品以較新的修改為準，刪除也會同步。</p>
@@ -206,17 +216,17 @@
 <button type="button" class="fab" id="btn-add" aria-label="新增商品">＋</button>
 
 <nav class="tabbar">
-  <button type="button" class="tab" data-tab="list"><span class="tab-icon">🛍️</span>清單</button>
-  <button type="button" class="tab" data-tab="refund"><span class="tab-icon">🧾</span>退稅</button>
-  <button type="button" class="tab" data-tab="settings"><span class="tab-icon">⚙️</span>設定</button>
+  <button type="button" class="tab" data-tab="list"><span class="tab-icon" aria-hidden="true">🛍️</span>清單</button>
+  <button type="button" class="tab" data-tab="refund"><span class="tab-icon" aria-hidden="true">🧾</span>退稅</button>
+  <button type="button" class="tab" data-tab="settings"><span class="tab-icon" aria-hidden="true">⚙️</span>設定</button>
 </nav>
 
 <!-- 商品編輯 -->
-<div class="sheet" id="editor" hidden>
+<div class="sheet" id="editor" role="dialog" aria-modal="true" aria-labelledby="editor-title" hidden>
   <div class="sheet-inner">
     <header class="sheet-head">
       <button type="button" class="link-btn" id="btn-editor-cancel">取消</button>
-      <h2 id="editor-title">新增商品</h2>
+      <h2 id="editor-title" tabindex="-1">新增商品</h2>
       <button type="button" class="link-btn strong" id="btn-editor-save">儲存</button>
     </header>
     <form id="item-form" class="sheet-body" autocomplete="off">
@@ -234,7 +244,7 @@
         </label>
       </div>
 
-      <div class="result" id="editor-result" aria-live="polite"></div>
+      <div class="result" id="editor-result"></div>
 
       <div class="grid2">
         <label>數量<input type="number" name="qty" min="1" step="1" value="1" inputmode="numeric"></label>
@@ -282,7 +292,8 @@
           <input type="number" id="quote-price" min="0" step="any" inputmode="decimal" placeholder="含稅標價">
           <button type="button" class="btn small" id="btn-quote-add">加入</button>
         </div>
-        <p class="hint">報價只做比較，不計入合計；按「採用」會把該店與價格換成主要的店家與標價。</p>
+        <label class="check small-check"><input type="checkbox" id="quote-taxfree" checked>這家可以退稅（中古、二手通常不行）</label>
+        <p class="hint">報價只做比較，不計入合計，並以退稅後的淨成本比較；按「採用」會把該店換成主要的店家與標價。</p>
       </details>
 
       <details class="more" id="editor-more">
@@ -296,8 +307,8 @@
         <div class="photo-row">
           <div class="photo-box" id="photo-box"><span class="photo-empty">＋ 照片</span></div>
           <div class="photo-actions">
-            <label class="btn small">📷 拍照<input type="file" id="photo-camera" accept="image/*" capture="environment" hidden></label>
-            <label class="btn small">🖼️ 從相簿選<input type="file" id="photo-input" accept="image/*" hidden></label>
+            <label class="btn small">📷 拍照<input type="file" id="photo-camera" accept="image/*" capture="environment" class="sr-only"></label>
+            <label class="btn small">🖼️ 從相簿選<input type="file" id="photo-input" accept="image/*" class="sr-only"></label>
             <button type="button" class="btn small" id="btn-photo-clear">移除照片</button>
           </div>
         </div>
@@ -317,11 +328,11 @@
 </div>
 
 <!-- 我的券 -->
-<div class="sheet" id="coupons" hidden>
+<div class="sheet" id="coupons" role="dialog" aria-modal="true" aria-label="我的券" hidden>
   <div class="sheet-inner">
     <header class="sheet-head">
       <button type="button" class="link-btn" id="btn-coupons-close">關閉</button>
-      <h2>🎫 我的券</h2>
+      <h2 tabindex="-1">🎫 我的券</h2>
       <span></span>
     </header>
     <div class="sheet-body">
@@ -339,8 +350,8 @@
         <div class="photo-row">
           <div class="photo-box" id="coupon-photo-box"><span class="photo-empty">＋ 券圖</span></div>
           <div class="photo-actions">
-            <label class="btn small">📷 拍照<input type="file" id="coupon-camera" accept="image/*" capture="environment" hidden></label>
-            <label class="btn small">🖼️ 從相簿選<input type="file" id="coupon-photo" accept="image/*" hidden></label>
+            <label class="btn small">📷 拍照<input type="file" id="coupon-camera" accept="image/*" capture="environment" class="sr-only"></label>
+            <label class="btn small">🖼️ 從相簿選<input type="file" id="coupon-photo" accept="image/*" class="sr-only"></label>
             <button type="button" class="btn small" id="btn-coupon-photo-clear">移除</button>
           </div>
         </div>
@@ -354,18 +365,18 @@
 </div>
 
 <!-- 圖片放大 -->
-<div class="viewer" id="viewer" hidden><img id="viewer-img" alt="券圖放大"><p class="hint">點任意處關閉</p></div>
+<div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="券圖放大" hidden><img id="viewer-img" alt="券圖放大"><button type="button" class="btn" id="btn-viewer-close">關閉</button></div>
 
 <!-- 首次設定 -->
-<div class="sheet" id="onboard" hidden>
+<div class="sheet" id="onboard" role="dialog" aria-modal="true" aria-label="開始之前" hidden>
   <div class="sheet-inner">
     <header class="sheet-head">
       <span></span>
-      <h2>開始之前</h2>
+      <h2 tabindex="-1">開始之前</h2>
       <button type="button" class="link-btn" id="btn-onboard-skip">稍後再說</button>
     </header>
     <form id="onboard-form" class="sheet-body" autocomplete="off">
-      <p class="hint">三個問題，之後都可以在設定裡改。</p>
+      <p class="hint">幾個問題，之後都可以在設定裡改。</p>
       <label>你從哪裡出發（比價與換算用的幣別）
         <select name="home">
           <option value="TWD">台灣 TWD</option>
@@ -384,13 +395,22 @@
         <input type="number" name="fx" step="any" min="0" inputmode="decimal" placeholder="例：0.2072">
       </label>
       <p class="hint" id="onboard-fx-preview">可以先空著，之後清單頁會提醒你填。</p>
+      <label id="onboard-eligibility-row">你在日本的身分（決定能不能退稅）
+        <select name="eligibility">
+          <option value="tourist">短期觀光或商務，入境未滿 6 個月</option>
+          <option value="cruise">搭郵輪，下船觀光</option>
+          <option value="jp">日本籍，住海外 2 年以上</option>
+          <option value="no">打工度假、留學、工作或長住</option>
+        </select>
+      </label>
+      <p class="hint" id="onboard-eligibility-hint"></p>
       <label class="check"><input type="checkbox" name="refundEnabled" checked>這趟會辦理免稅／退稅</label>
       <div class="row"><button type="submit" class="btn primary wide">開始使用</button></div>
     </form>
   </div>
 </div>
 
-<div class="toast" id="toast" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="guides.js"></script>
 <script src="app.js"></script>
