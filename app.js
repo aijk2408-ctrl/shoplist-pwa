@@ -4,7 +4,8 @@
 
   const STORAGE_KEY = 'shoplist.v1';
   const DRAFT_KEY = 'shoplist.draft';
-  const APP_VERSION = 'v7（2026-11-05）';
+  const CORRUPT_KEY = 'shoplist.corrupt';
+  const APP_VERSION = 'v8（2026-11-05）';
 
   // 國家規則預設值（試算用，非官方；可在設定中覆寫）
   const COUNTRIES = {
@@ -34,6 +35,7 @@
     refund: [
       '購買紀錄齊全（電子紀錄綁定護照，或保留收據）',
       '所有免稅商品先到海關端末確認，再決定隨身或託運；出境前不拆封使用',
+      '旅途中用掉的消耗品要向稅關申報；同一張收據的其他商品也不能退',
       '護照（入境時已蓋章或留有入境紀錄）',
       '全部商品都在出境前 90 天內購買',
       '到機場先辦海關端末或 Visit Japan Web，再去報到',
@@ -62,7 +64,9 @@
   ];
 
   // ---------- 狀態 ----------
+  let corruptRaw = null; // 讀不懂的舊資料，保留原文讓使用者下載
   let state = load();
+  let lastSaved = JSON.stringify(state); // 上一次成功寫入的內容；存檔失敗時還原到這裡
   let ui = { tab: 'list', brand: 'all', store: 'all', buyer: 'all', status: 'all', boughtOnly: false, editorPhoto: null, editorQuotes: [], editorSnapshot: '', installEvent: null, prefill: null };
 
   function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
@@ -91,7 +95,7 @@
   function newItem(tripId, overrides) {
     return Object.assign({
       id: uid(), tripId, brand: '', name: '', note: '', store: '', date: '', buyer: '', card: '', qty: 1, homePrice: 0, localPrice: null, altPrice: 0, altLabel: '',
-      taxFree: true, taxRate: null, priceIsPretax: false, coupon: 0, couponConfirmed: false, bought: false, photo: null, quotes: [], createdAt: Date.now(), updatedAt: Date.now()
+      taxFree: true, taxRate: null, priceIsPretax: false, consumed: false, consumedSeparate: false, coupon: 0, couponConfirmed: false, bought: false, photo: null, quotes: [], createdAt: Date.now(), updatedAt: Date.now()
     }, overrides || {});
   }
   function refundOn(trip) { return trip.refundEnabled !== false; }
@@ -116,27 +120,90 @@
     s.schema = 2;
     return s;
   }
+  // 逐欄記錄修改時間，合併時才不會因為對方改了別的欄位，就蓋掉這邊的已買
+  const MERGE_FIELDS = ['brand', 'name', 'note', 'store', 'date', 'buyer', 'card', 'qty', 'homePrice', 'localPrice', 'altPrice', 'altLabel', 'taxFree', 'taxRate', 'priceIsPretax', 'coupon', 'couponConfirmed', 'consumed', 'consumedSeparate', 'bought', 'photo', 'quotes'];
+  function sameValue(a, b) {
+    const n = (v) => (v == null || v === false ? null : v);
+    return JSON.stringify(n(a)) === JSON.stringify(n(b));
+  }
+  function fieldTime(i, f) {
+    const t = i.ft && i.ft[f];
+    if (t) return t;
+    return i.ftBase != null ? i.ftBase : (i.updatedAt || 0);
+  }
+  function stampChanges(next, prev) {
+    const now = Date.now();
+    const ft = Object.assign({}, prev.ft);
+    MERGE_FIELDS.forEach((f) => { if (!sameValue(next[f], prev[f])) ft[f] = now; });
+    next.ft = ft;
+    next.ftBase = prev.ftBase != null ? prev.ftBase : (prev.updatedAt || 0);
+  }
+  function mergeItem(cur, inc) {
+    let changed = false;
+    const base = cur.ftBase != null ? cur.ftBase : (cur.updatedAt || 0);
+    const ft = Object.assign({}, cur.ft);
+    MERGE_FIELDS.forEach((f) => {
+      const ti = fieldTime(inc, f);
+      if (ti > fieldTime(cur, f)) {
+        if (!sameValue(cur[f], inc[f])) { cur[f] = inc[f]; changed = true; }
+        ft[f] = ti;
+      }
+    });
+    cur.ft = ft;
+    cur.ftBase = base;
+    cur.updatedAt = Math.max(cur.updatedAt || 0, inc.updatedAt || 0);
+    return changed;
+  }
   function markDeleted(id) { state.deleted = state.deleted || {}; state.deleted[id] = Date.now(); }
 
   function load() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
+    let raw = null;
+    try { raw = localStorage.getItem(STORAGE_KEY); } catch (_) { /* 無法讀取就視為沒有資料 */ }
+    if (raw) {
+      try {
         const s = JSON.parse(raw);
         if (s && Array.isArray(s.trips) && Array.isArray(s.items) && s.trips.length) return migrateState(s);
-      }
-    } catch (_) { /* 讀取失敗就重建 */ }
+      } catch (_) { /* 解析失敗，往下保留原文 */ }
+      corruptRaw = raw;
+      try { localStorage.setItem(CORRUPT_KEY, raw); } catch (_) { /* 空間不足時仍可從記憶體下載 */ }
+    }
     const t = newTrip({ name: '我的旅程' });
     return { trips: [t], items: [], currentTripId: t.id, deleted: {}, schema: 2 };
   }
+  // 成功才算數；失敗時把記憶體還原成上次存好的內容，畫面才不會顯示假資料
   function save() {
+    const json = JSON.stringify(state);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY, json);
+      lastSaved = json;
+      hideBanner('save');
       return true;
     } catch (e) {
-      toast('儲存失敗：空間不足，請移除部分照片');
+      state = JSON.parse(lastSaved);
+      showBanner('save');
+      renderAll();
       return false;
     }
+  }
+  function showBanner(kind) {
+    const box = $('#app-banner');
+    box.dataset.kind = kind;
+    $('#app-banner-text').textContent = kind === 'corrupt'
+      ? '讀取舊資料時發生問題，目前顯示的是空白清單。原始內容已另外保留，請先下載，之後可以協助救回。'
+      : '沒有存成功：手機或 App 的儲存空間不足，剛才的修改沒有存下。請刪掉一些照片或券圖後再試，或先下載備份。';
+    $('#btn-banner-download').textContent = kind === 'corrupt' ? '下載舊資料' : '下載備份';
+    box.hidden = false;
+  }
+  function hideBanner(kind) {
+    const box = $('#app-banner');
+    if (box && !box.hidden && box.dataset.kind === kind) box.hidden = true;
+  }
+  function downloadCorrupt() {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([corruptRaw || localStorage.getItem(CORRUPT_KEY) || ''], { type: 'text/plain' }));
+    a.download = `購物清單受損資料_${today()}.txt`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
   function currentTrip() {
     return state.trips.find((t) => t.id === state.currentTripId) || state.trips[0];
@@ -206,7 +273,7 @@
     const pretax = pretaxPrice ? afterCoupon : (rate > 0 ? afterCoupon / (1 + rate) : afterCoupon);
     const tax = afterCoupon - pretax;
     const dr = item.taxFree && !pretaxPrice ? dateRule(item, trip) : null;
-    const eligible = !pretaxPrice && refundOn(trip) && !!item.taxFree && groupOk !== false && rate > 0 && !(dr && dr.block);
+    const eligible = !pretaxPrice && refundOn(trip) && !!item.taxFree && groupOk !== false && rate > 0 && !(dr && dr.block) && !item.consumed;
     // 實際可拿回：稅額 × 退回比例 − 購買金額 × 退稅手續費
     const ratio = trip.refundRatio == null || trip.refundRatio === '' ? 1 : num(trip.refundRatio) / 100;
     const refundFee = num(trip.refundFeePct) / 100;
@@ -236,7 +303,7 @@
   }
 
   function countsForThreshold(it, trip) {
-    if (!it.taxFree || it.priceIsPretax) return false;
+    if (!it.taxFree || it.priceIsPretax || it.consumed) return false;
     const dr = dateRule(it, trip);
     return !(dr && dr.block);
   }
@@ -260,7 +327,8 @@
     buckets.forEach((gs) => {
       const undated = gs.find((g) => !g.date);
       const dated = gs.filter((g) => g.date).sort((a, b) => b.date.localeCompare(a.date));
-      if (undated && dated.length) {
+      // 只併入今天或之後的購買日；日期已過的那天，未買的商品不可能再算進去
+      if (undated && dated.length && dated[0].date >= today()) {
         dated[0].items = dated[0].items.concat(undated.items);
         dated[0].mergedUndated = undated.items.length;
         map.delete(undated.key);
@@ -272,6 +340,13 @@
       g.items.forEach((it) => { if (countsForThreshold(it, trip)) g.pretaxSum += calcItem(it, trip, true).pretax; });
       g.ok = th <= 0 || g.pretaxSum >= th;
       g.shortfall = g.ok ? 0 : th - g.pretaxSum;
+      g.boughtPretax = 0;
+      g.items.forEach((it) => { if (it.bought && countsForThreshold(it, trip)) g.boughtPretax += calcItem(it, trip, true).pretax; });
+      g.boughtOk = th <= 0 || g.boughtPretax >= th;
+      g.pendingCount = g.items.filter((it) => !hasPrice(it)).length;
+      // 官方以收據判定：用掉一件，同一張收據的其他商品也不能退
+      g.receiptBlocked = refundOn(trip) && g.items.some((it) => it.consumed && !it.consumedSeparate && it.taxFree && !it.priceIsPretax);
+      if (g.receiptBlocked) { g.ok = false; g.boughtOk = false; g.shortfall = 0; }
     });
     // 全程最低總額（泰國等）：達門檻分組的未稅合計仍不足時，全部不可退
     const minTotal = num(trip.tripMinTotal);
@@ -308,22 +383,59 @@
     return { rate, discount, netDelta, homeDelta: withC.home - noC.home, lostRefund: Math.max(0, discount + netDelta) };
   }
   function grossUp(pretax, ratePct) { return pretax * (1 + ratePct / 100); }
+  // 同店同日有多張券時，列舉每種用法找最省的。假設每張券可以各自決定用或不用
+  function couponPlan(item, trip, items) {
+    const g = groupFor(item, trip, items);
+    if (!g || g.noStore) return null;
+    const members = g.items.filter((i) => num(i.coupon) > 0 && num(i.localPrice) > 0);
+    if (members.length < 2 || members.length > 8) return null;
+    const ids = new Set(members.map((m) => m.id));
+    const pool = (num(trip.tripMinTotal) > 0 ? items.filter((i) => i.id !== item.id).concat(g.items.filter((i) => i.id === item.id)) : g.items).filter((i) => !ids.has(i.id));
+    const evalMask = (mask) => {
+      const variants = members.map((m, ix) => Object.assign({}, m, mask & (1 << ix) ? { couponConfirmed: true } : { coupon: 0, couponConfirmed: false }));
+      const t = totals(pool.concat(variants), trip);
+      return { mask, net: t.net, home: t.home };
+    };
+    let best = null;
+    let ties = 0;
+    for (let mask = 0; mask < (1 << members.length); mask++) {
+      const e = evalMask(mask);
+      if (!best || e.home < best.home - 0.5) { best = e; ties = 0; } else if (Math.abs(e.home - best.home) <= 0.5) ties++;
+    }
+    let currentMask = 0;
+    members.forEach((m, ix) => { if (m.couponConfirmed) currentMask |= 1 << ix; });
+    const names = members.filter((m, ix) => best.mask & (1 << ix)).map((m) => m.name);
+    const desc = !names.length ? '都不用券' : (names.length === members.length ? '全部用券' : `只用「${names.join('、')}」的券`);
+    return { members, best, ties, desc, current: evalMask(currentMask), all: evalMask((1 << members.length) - 1), none: evalMask(0),
+      uses: (id) => { const ix = members.findIndex((m) => m.id === id); return ix >= 0 && !!(best.mask & (1 << ix)); } };
+  }
+  function planText(plan, trip) {
+    return `同店同日 ${plan.members.length} 張券，最省是${plan.desc}：淨成本 ${money(plan.best.net, trip.local)}（全用 ${money(plan.all.net, trip.local)}，全不用 ${money(plan.none.net, trip.local)}${plan.ties ? '；同樣省的用法不只一種' : ''}）`;
+  }
 
   function totals(items, trip) {
     const { groups, byItem, tripShort } = buildGroups(items, trip);
-    const t = { count: items.length, bought: items.filter((i) => i.bought).length, pending: items.filter((i) => !hasPrice(i)).length, boughtPending: items.filter((i) => i.bought && !hasPrice(i)).length, pay: 0, refund: 0, net: 0, home: 0, payHome: 0, saving: 0, homeCompare: 0, boughtPay: 0, boughtHome: 0, boughtPayHome: 0, todayPay: 0, byBuyer: new Map(), groups, byItem, tripShort };
+    const t = { count: items.length, bought: items.filter((i) => i.bought).length, pending: items.filter((i) => !hasPrice(i)).length, boughtPending: items.filter((i) => i.bought && !hasPrice(i)).length, pay: 0, refund: 0, net: 0, home: 0, payHome: 0, saving: 0, homeCompare: 0, boughtPay: 0, boughtHome: 0, boughtPayHome: 0, todayPay: 0, confirmedRefund: 0, plannedRefund: 0, byBuyer: new Map(), groups, byItem, tripShort };
     const td = today();
     groups.forEach((g) => {
       t.pay += g.pay; t.refund += g.refund; t.net += g.net; t.home += g.home; t.payHome += g.payHome;
       g.items.forEach((it) => {
         const r = calcItem(it, trip, g.ok);
         if (r.saving != null) { t.saving += r.saving; t.homeCompare += r.homeCompare; }
-        if (it.bought) { t.boughtPay += r.pay; t.boughtHome += r.home; t.boughtPayHome += r.payHome; if (it.date === td) t.todayPay += r.pay; }
         const b = (it.buyer || '').trim() || '未指定';
         if (!t.byBuyer.has(b)) t.byBuyer.set(b, { buyer: b, count: 0, pay: 0, refund: 0, home: 0, payHome: 0 });
         const bb = t.byBuyer.get(b); bb.count++; bb.pay += r.pay; bb.refund += r.refund; bb.home += r.home; bb.payHome += r.payHome;
       });
     });
+    // 已確定只看真的買了的商品：未買的不能幫已買的湊門檻
+    buildGroups(items.filter((i) => i.bought), trip).groups.forEach((g) => {
+      g.items.forEach((it) => {
+        const r = calcItem(it, trip, g.ok);
+        t.boughtPay += r.pay; t.boughtHome += r.home; t.boughtPayHome += r.payHome; t.confirmedRefund += r.refund;
+        if (it.date === td) t.todayPay += r.pay;
+      });
+    });
+    t.plannedRefund = Math.max(0, t.refund - t.confirmedRefund);
     return t;
   }
 
@@ -366,31 +478,32 @@
     const t = totals(items, trip);
     const summary = $('#summary');
     const budget = num(trip.budget);
-    const fxStat = trip.fxDefault
-      ? `<button type="button" class="stat link warn" data-goto="fx"><div class="k">匯率（預設值，請更新）</div><div class="v">1 ${esc(trip.local)} = ${esc(String(trip.fx))}</div><div class="s">點此到設定填入今天的匯率 ›</div></button>`
-      : `<button type="button" class="stat link" data-goto="fx"><div class="k">匯率</div><div class="v">1 ${esc(trip.local)} = ${esc(String(trip.fx))}</div><div class="s">${num(trip.cardFee) > 0 ? `刷卡費 ${num(trip.cardFee)}%・` : ''}點此修改 ›</div></button>`;
-    let budgetStat;
-    if (budget > 0) {
-      const used = t.boughtPay / budget;
-      const left = budget - t.boughtPay;
-      budgetStat = `<button type="button" class="stat link ${used >= 1 ? 'bad' : (used >= 0.9 ? 'warn' : '')}" data-goto="budget"><div class="k">預算${used >= 1 ? '（已超支）' : ''}</div><div class="v">${left >= 0 ? '剩 ' : '超 '}${money(Math.abs(left), trip.local)}</div><div class="s">預算 ${money(budget, trip.local)}，已用 ${pct(used)}</div></button>`;
-    } else {
-      budgetStat = `<button type="button" class="stat link" data-goto="budget"><div class="k">預算</div><div class="v">未設定</div><div class="s">設定後顯示剩多少 ›</div></button>`;
-    }
-    const pendingStat = t.pending
-      ? `<button type="button" class="stat link warn" data-show-pending><div class="k">${t.pending} 項待查價</div><div class="v">合計未含這些商品</div><div class="s">點此只看待查價的商品 ›</div></button>`
-      : '';
+    const used = budget > 0 ? t.boughtPay / budget : 0;
+    const left = budget - t.boughtPay;
+    // 需要處理的事才放在最上面，其餘收進「更多數字」
+    const alerts = [];
+    if (trip.fxDefault) alerts.push(`<button type="button" class="alert-line" data-goto="fx">⚠ 匯率還是預設值 ${esc(String(trip.fx))}，點此更新 ›</button>`);
+    if (t.pending) alerts.push(`<button type="button" class="alert-line" data-show-pending>${t.pending} 項待查價，合計未含，點此查看 ›</button>`);
+    if (budget > 0 && used >= 0.9) alerts.push(`<button type="button" class="alert-line ${used >= 1 ? 'bad' : ''}" data-goto="budget">${left >= 0 ? `預算只剩 ${money(left, trip.local)}` : `已超支 ${money(-left, trip.local)}`} ›</button>`);
+    const refundStat = !refundOn(trip)
+      ? stat('退稅', '不辦理', '可在設定中開啟')
+      : (trip.mode === 'instant'
+        ? stat('現場免稅', '自動扣除', '達門檻的店直接付未稅價')
+        : stat('已確定退稅', money(t.confirmedRefund, trip.local), t.plannedRefund > 0.5 ? `買齊計畫再加 ${money(t.plannedRefund, trip.local)}` : '依已買商品計算'));
     summary.innerHTML = [
       stat('已花（已買）', money(t.boughtPay, trip.local), `≈ ${money(t.boughtPayHome, trip.home)}・今天 ${money(t.todayPay, trip.local)}${t.boughtPending ? `・${t.boughtPending} 項未填價` : ''}`),
-      budgetStat,
+      refundStat
+    ].concat(alerts).join('');
+    $('#summary-more').hidden = !ui.moreOpen;
+    $('#btn-more').textContent = ui.moreOpen ? '收起數字 ▴' : '更多數字 ▾';
+    $('#summary-more').innerHTML = [
+      budget > 0
+        ? `<button type="button" class="stat link" data-goto="budget"><div class="k">預算</div><div class="v">${left >= 0 ? '剩 ' : '超 '}${money(Math.abs(left), trip.local)}</div><div class="s">預算 ${money(budget, trip.local)}，已用 ${pct(used)}</div></button>`
+        : `<button type="button" class="stat link" data-goto="budget"><div class="k">預算</div><div class="v">未設定</div><div class="s">設定後顯示剩多少 ›</div></button>`,
       stat('全部清單', `${t.count} 項`, `已買 ${t.bought} 項・預計 ${money(t.pay, trip.local)}`),
-      refundOn(trip)
-        ? stat('預計退稅', money(t.refund, trip.local), trip.mode === 'refund' ? '出境後拿回，依各店門檻' : '現場直接扣除')
-        : stat('退稅', '不辦理', '可在設定中開啟'),
-      stat(`退稅後成本（${trip.home}）`, money(t.home, trip.home), t.homeCompare > 0 ? `比出發地${t.saving >= 0 ? '省' : '多'} ${money(Math.abs(t.saving), trip.home)}` : `已買 ${money(t.boughtHome, trip.home)}`, t.saving > 0 ? 'good' : (t.saving < 0 ? 'bad' : '')),
-      fxStat,
-      pendingStat
-    ].filter(Boolean).join('');
+      stat(`買齊後成本（${trip.home}）`, money(t.home, trip.home), t.homeCompare > 0 ? `比出發地${t.saving >= 0 ? '省' : '多'} ${money(Math.abs(t.saving), trip.home)}` : `已買 ${money(t.boughtHome, trip.home)}`, t.saving > 0 ? 'good' : (t.saving < 0 ? 'bad' : '')),
+      `<button type="button" class="stat link" data-goto="fx"><div class="k">匯率</div><div class="v">1 ${esc(trip.local)} = ${esc(String(trip.fx))}</div><div class="s">${num(trip.cardFee) > 0 ? `刷卡費 ${num(trip.cardFee)}%・` : ''}點此修改 ›</div></button>`
+    ].join('');
 
     // 快速記一筆：店家與買者可直接修改，下一筆沿用
     const qf = $('#quick-form');
@@ -402,7 +515,6 @@
     $('#buyer-list').innerHTML = recentBuyers(trip).map((s) => `<option value="${esc(s)}">`).join('');
     const nCoupons = (trip.coupons || []).filter((c) => !couponExpired(c)).length;
     $('#btn-coupons').textContent = `🎫 我的券${nCoupons ? `（${nCoupons}）` : ''}`;
-    $('#coupon-hint').textContent = nCoupons ? '到有券的店家，卡片會顯示 🎫' : '存店家的券或會員 QR，到店自動提醒';
 
     // 篩選列
     const stores = recentStores(trip).sort((a, b) => a.localeCompare(b));
@@ -414,6 +526,12 @@
     const brands = Array.from(new Set(items.map((i) => (i.brand || '').trim()).filter(Boolean))).sort();
     if (ui.brand !== 'all' && !brands.some((b) => normStore(b) === ui.brand)) ui.brand = 'all';
     chipRow($('#brand-chips'), brands, ui.brand, 'brand', '全部品牌');
+    const activeFilters = [ui.store, ui.buyer, ui.brand].filter((v) => v !== 'all').length;
+    const canFilter = stores.length >= 2 || buyers.length >= 2 || brands.length >= 2;
+    $('#btn-filter').hidden = !canFilter;
+    $('#btn-filter').textContent = `篩選${activeFilters ? `・${activeFilters}` : ''}`;
+    $('#btn-filter').classList.toggle('active', activeFilters > 0);
+    $('#filter-panel').hidden = !ui.filterOpen || !canFilter;
     $$('.status-chips .chip').forEach((c) => c.classList.toggle('active', c.dataset.status === ui.status));
 
     const shown = items.filter((i) =>
@@ -428,21 +546,46 @@
       return;
     }
     const th = num(trip.threshold);
+    const planCache = new Map();
     list.innerHTML = shown.map((it) => {
       const g = t.byItem.get(it.id);
       const r = calcItem(it, trip, g ? g.ok : true);
       let flag = '', flagCls = '';
-      const cc = r.pendingPrice ? null : couponCompare(it, trip, items);
+      let plan = null;
+      if (!r.pendingPrice && num(it.coupon) > 0 && g) {
+        if (!planCache.has(g.key)) planCache.set(g.key, couponPlan(it, trip, items));
+        plan = planCache.get(g.key);
+      }
+      const cc = r.pendingPrice || plan ? null : couponCompare(it, trip, items);
       if (r.pendingPrice) {
         flag = '還沒有標價，點卡片填入後才會計入合計'; flagCls = 'warnless';
       } else if (r.dateRule) {
         flag = `⚠ ${r.dateRule.text}`; flagCls = r.dateRule.block ? 'warn' : 'warnless';
+      } else if (it.consumed && it.consumedSeparate) {
+        flag = '這件會拆用且單獨結帳，不計退稅'; flagCls = 'warnless';
+      } else if (it.consumed) {
+        flag = '⚠ 這件會拆用，同一張收據的其他商品也不能退。單獨結帳可以保住其他商品的退稅'; flagCls = 'warn';
+      } else if (g && g.receiptBlocked) {
+        flag = '⚠ 同店有會拆用的商品，這組目前不計退稅。把拆用的東西單獨結帳可以保住'; flagCls = 'warn';
+      } else if (plan && !plan.uses(it.id) && it.couponConfirmed) {
+        // 已經套用但不划算才警告；還沒確認的券只是建議，不必吵
+        flag = `⚠ 建議不要用這張券。${planText(plan, trip)}`; flagCls = 'warn';
+      } else if (plan && !plan.uses(it.id)) {
+        flag = `券 ${num(it.coupon)}% 這張不用比較省：同店最省是${plan.desc}`; flagCls = 'warnless';
+      } else if (plan && !it.couponConfirmed) {
+        flag = `券 ${num(it.coupon)}% 待店員確認，這張建議用：同店最省是${plan.desc}`; flagCls = 'warnless';
       } else if (cc && cc.netDelta > 0.5) {
         flag = `⚠ 用 ${cc.rate}% 券反而多花 ${money(cc.netDelta, trip.local)}，因為退稅會少 ${money(cc.lostRefund, trip.local)}`; flagCls = 'warn';
+      } else if (it.bought && g && g.ok && !g.boughtOk && countsForThreshold(it, trip)) {
+        flag = g.date && g.date < today()
+          ? `${g.date} 已買的未稅 ${money(g.boughtPretax, trip.local)} 沒到門檻，這天已過，不計入已確定退稅`
+          : `已買的未稅 ${money(g.boughtPretax, trip.local)} 還沒到門檻，同一天買齊計畫中的商品才會退稅`; flagCls = 'warn';
       } else if (refundOn(trip) && countsForThreshold(it, trip) && g && !g.ok && th > 0) {
         if (g.tripShort) { flag = `全程未稅合計還差 ${money(g.tripShort, trip.local)} 才能退稅`; flagCls = 'warn'; }
         else if (g.noStore) {
           if (r.pretax > 0 && r.pretax < th) { flag = `填店家後可與同店商品合併計算免稅`; flagCls = 'warnless'; }
+        } else if (g.date && g.date < today()) {
+          flag = `${g.date} 的未稅合計沒到門檻，這些商品不計退稅`; flagCls = 'warn';
         } else {
           const rp = itemRate(it, trip);
           flag = `${g.store}${g.buyer ? `（${g.buyer}）` : ''} 同一天再買含稅約 ${money(grossUp(g.shortfall, rp), trip.local)} 就能退稅（未稅 ${money(g.shortfall, trip.local)}，以 ${rp}% 估）`; flagCls = 'warn';
@@ -473,7 +616,7 @@
       }
       const unit = r.qty > 1 && !r.pendingPrice ? `<span class="unit">${money(num(it.localPrice), trip.local)} × ${r.qty}</span>` : '';
       const prices = r.pendingPrice ? ['<span class="pending">待查價</span>'] : [`<span>現場 <b>${money(r.pay, trip.local)}</b> ≈ ${money(r.payHome, trip.home)}</span>`];
-      if (r.eligible && r.refund > 0) prices.push(`<span>退稅後 <b>${money(r.home, trip.home)}</b></span>`);
+      if (r.eligible && r.refund > 0) prices.push(`<span>${it.bought && g && !g.boughtOk ? '買齊後' : '退稅後'} <b>${money(r.home, trip.home)}</b></span>`);
       if (r.homeCompare > 0) prices.push(`<span>出發地 ${money(r.homeCompare, trip.home)}</span>`);
       return `<div class="item ${it.bought ? 'bought' : ''}" data-id="${it.id}">
         <button type="button" class="buy ${it.bought ? 'on' : ''}" data-buy="${it.id}" aria-pressed="${!!it.bought}" aria-label="已購買">${it.bought ? '✓' : ''}</button>
@@ -518,8 +661,9 @@
     const t = totals(items, trip);
     $('#refund-totals').innerHTML = [
       stat('現場付款合計', money(t.pay, trip.local), `≈ ${money(t.payHome, trip.home)}・${items.length} 項${t.pending ? `，${t.pending} 項待查價未計` : ''}`),
-      stat('預計退稅合計', money(t.refund, trip.local), !refundOn(trip) ? '不辦退稅' : (t.tripShort ? '全程未達最低總額' : (trip.mode === 'refund' ? '達門檻的店才計入' : '現場免稅不另退'))),
-      stat('退稅後成本合計', money(t.net, trip.local), '付款減退稅'),
+      stat('已確定退稅', money(t.confirmedRefund, trip.local), !refundOn(trip) ? '不辦退稅' : (t.tripShort ? '全程未達最低總額' : (trip.mode === 'refund' ? '只算已買的商品' : '現場免稅不另退'))),
+      stat('計畫中再加', money(t.plannedRefund, trip.local), '買齊未買的商品才會有'),
+      stat('買齊後成本', money(t.net, trip.local), '付款減退稅'),
       stat(`換算 ${trip.home}`, money(t.home, trip.home), '含刷卡手續費')
     ].join('');
 
@@ -531,7 +675,7 @@
     const th = num(trip.threshold);
     $('#threshold-hint').textContent = !refundOn(trip) ? '此旅程不辦退稅，以下僅供參考。'
       : (th > 0
-        ? `同一家店、同一天、同一位買者的免稅商品未稅合計需達 ${money(th, trip.local)}。沒填日期的併入該店最近一次購買日；沒填店家的不合併；標價已免稅的不計入。`
+        ? `同一家店、同一天、同一位買者的免稅商品未稅合計需達 ${money(th, trip.local)}。沒填日期的只併入今天或之後的購買日；沒填店家的不合併；標價已免稅的不計入。`
         : '目前未設定門檻，所有勾選可免稅的商品都視為可退。');
 
     const groups = Array.from(t.groups.values());
@@ -540,17 +684,27 @@
     let html = storeGroups.map((g) => {
       const taxItems = g.items.filter((i) => countsForThreshold(i, trip));
       const blocked = g.items.filter((i) => { const dr = i.taxFree && !i.priceIsPretax ? dateRule(i, trip) : null; return dr && dr.block; });
-      const status = !refundOn(trip) ? '' : (!taxItems.length ? (blocked.length ? '<span class="badge bad">日期不符</span>' : '<span class="badge none">無免稅商品</span>')
-        : (g.ok ? '<span class="badge good">達門檻</span>' : (g.tripShort ? '<span class="badge bad">全程未達</span>' : `<span class="badge bad">差 ${money(g.shortfall, trip.local)}</span>`)));
+      const pricedTax = taxItems.filter(hasPrice);
+      const firstCoupon = g.items.find((i) => num(i.coupon) > 0 && num(i.localPrice) > 0);
+      const groupPlan = firstCoupon ? couponPlan(firstCoupon, trip, items) : null;
+      const status = !refundOn(trip) ? '' : (g.receiptBlocked ? '<span class="badge bad">有拆用商品</span>'
+        : (!taxItems.length ? (blocked.length ? '<span class="badge bad">日期不符</span>' : '<span class="badge none">無免稅商品</span>')
+        : (!pricedTax.length ? '<span class="badge none">待查價</span>'
+        : (g.ok ? (g.boughtOk ? '<span class="badge good">已達門檻</span>' : '<span class="badge even">計畫達標，還沒買齊</span>')
+        : (g.tripShort ? '<span class="badge bad">全程未達</span>' : `<span class="badge bad">差 ${money(g.shortfall, trip.local)}</span>`)))));
       return `<div class="group">
         <div class="g-head"><div><div class="g-store">${esc(g.store)}${g.buyer ? ` <span class="small">👤 ${esc(g.buyer)}</span>` : ''}</div><div class="g-date">${esc(g.date || '日期未填')}・${g.items.length} 項${g.mergedUndated ? `（含 ${g.mergedUndated} 項未填日期，假設同日購買）` : ''}</div></div>${status}</div>
         <div class="g-lines">
           <div><span>免稅商品未稅合計</span><b>${money(g.pretaxSum, trip.local)}</b></div>
+          ${g.boughtPretax > 0 && g.boughtPretax !== g.pretaxSum ? `<div><span>其中已買</span><b>${money(g.boughtPretax, trip.local)}</b></div>` : ''}
           <div><span>現場付款</span><b>${money(g.pay, trip.local)}</b></div>
           <div><span>預計退稅</span><b>${money(g.refund, trip.local)}</b></div>
         </div>
         <div class="g-items">${esc(g.items.map((i) => (i.bought ? '✓ ' : '') + [i.brand, i.name].filter(Boolean).join(' ')).join('、'))}</div>
-        ${refundOn(trip) && !g.ok && g.shortfall > 0 && !g.tripShort && taxItems.length ? `<p class="hint">同一天再買含稅約 ${money(grossUp(g.shortfall, num(trip.taxRate)), trip.local)} 就達門檻（以 ${num(trip.taxRate)}% 估）。</p>` : ''}
+        ${g.pendingCount ? `<p class="hint">另有 ${g.pendingCount} 項待查價，未計入上面的金額。</p>` : ''}
+        ${g.receiptBlocked ? '<p class="g-warn">⚠ 用掉一件，同一張收據的其他商品也不能退。把拆用的東西單獨結帳可以保住。</p>' : ''}
+        ${groupPlan && groupPlan.current.home - groupPlan.best.home > 0.5 ? (groupPlan.members.some((m) => m.couponConfirmed && !groupPlan.uses(m.id)) ? `<p class="g-warn">⚠ ${esc(planText(groupPlan, trip))}</p>` : `<p class="hint">${esc(planText(groupPlan, trip))}</p>`) : ''}
+        ${refundOn(trip) && !g.ok && g.shortfall > 0 && !g.tripShort && pricedTax.length && !(g.date && g.date < today()) ? `<p class="hint">同一天再買含稅約 ${money(grossUp(g.shortfall, num(trip.taxRate)), trip.local)} 就達門檻（以 ${num(trip.taxRate)}% 估）。</p>` : ''}
         ${blocked.length ? `<p class="g-warn">⚠ 日期不符、不計退稅：${esc(blocked.map((i) => i.name).join('、'))}</p>` : ''}
       </div>`;
     }).join('');
@@ -675,7 +829,9 @@
     const trip = currentTrip(); const c = (trip.coupons || []).find((x) => x.id === id); if (!c) return;
     if (!confirm(`刪除「${c.title || c.store || '這張券'}」？`)) return;
     markDeleted(id);
-    trip.coupons = trip.coupons.filter((x) => x.id !== id); save(); renderCoupons(trip); toast('已刪除');
+    trip.coupons = trip.coupons.filter((x) => x.id !== id);
+    if (!save()) { renderCoupons(currentTrip()); return; }
+    renderCoupons(trip); toast('已刪除');
   }
   function openViewer(src) { $('#viewer-img').src = src; $('#viewer').hidden = false; }
   function closeViewer() { $('#viewer').hidden = true; $('#viewer-img').src = ''; }
@@ -835,12 +991,12 @@
     save();
     $('#onboard').hidden = true; document.body.style.overflow = '';
     renderAll();
-    if (apply) toast('設定完成');
+    if (apply && lastSaved === JSON.stringify(state)) toast('設定完成');
   }
 
   // ---------- 編輯面板 ----------
   const FIELDS = ['brand', 'name', 'note', 'store', 'date', 'buyer', 'card', 'qty', 'homePrice', 'localPrice', 'altPrice', 'altLabel', 'taxRate', 'coupon'];
-  const CHECKS = ['taxFree', 'priceIsPretax', 'couponConfirmed', 'bought'];
+  const CHECKS = ['taxFree', 'priceIsPretax', 'consumed', 'consumedSeparate', 'couponConfirmed', 'bought'];
 
   function formSnapshot() {
     const form = $('#item-form');
@@ -896,6 +1052,8 @@
     form.taxRate.value = item && item.taxRate != null && item.taxRate !== '' ? String(num(item.taxRate)) : '';
     form.taxFree.checked = item ? !!item.taxFree : refundOn(trip);
     form.priceIsPretax.checked = item ? !!item.priceIsPretax : false;
+    form.consumed.checked = item ? !!item.consumed : false;
+    form.consumedSeparate.checked = item ? !!item.consumedSeparate : false;
     form.coupon.value = item ? item.coupon : 0;
     form.couponConfirmed.checked = item ? !!item.couponConfirmed : false;
     form.bought.checked = item ? !!item.bought : false;
@@ -948,6 +1106,8 @@
   function renderTaxRows(trip) {
     const form = $('#item-form');
     $('#taxfree-row').hidden = !refundOn(trip) || form.priceIsPretax.checked;
+    $('#consumed-row').hidden = !refundOn(trip) || form.priceIsPretax.checked;
+    $('#consumed-detail').hidden = !form.consumed.checked;
     $('#local-price-kind').textContent = form.priceIsPretax.checked ? '已不含稅' : '含稅';
   }
   function closeEditor(force) {
@@ -972,7 +1132,7 @@
       brand: form.brand.value.trim(), name: form.name.value.trim(), note: form.note.value.trim(), store: form.store.value.trim(),
       date: form.date.value, buyer: form.buyer.value.trim(), card: form.card.value, qty: Math.max(1, Math.round(num(form.qty.value, 1))),
       homePrice: num(form.homePrice.value), localPrice: form.localPrice.value.trim() === '' ? null : num(form.localPrice.value), altPrice: num(form.altPrice.value), altLabel: form.altLabel.value.trim(),
-      taxFree: form.taxFree.checked, taxRate: form.taxRate.value === '' ? null : num(form.taxRate.value), priceIsPretax: form.priceIsPretax.checked,
+      taxFree: form.taxFree.checked, taxRate: form.taxRate.value === '' ? null : num(form.taxRate.value), priceIsPretax: form.priceIsPretax.checked, consumed: form.consumed.checked, consumedSeparate: form.consumedSeparate.checked,
       coupon: num(form.coupon.value), couponConfirmed: form.couponConfirmed.checked, bought: form.bought.checked, photo: ui.editorPhoto,
       quotes: ui.editorQuotes.map((q) => ({ store: (q.store || '').trim(), price: num(q.price), date: q.date || '' })), updatedAt: Date.now()
     }));
@@ -1040,18 +1200,28 @@
       if (k > 3 || k < 1 / 3) warn.push(`兩個價格相差超過三倍：當地標價換算約 ${money(num(item.localPrice) * num(trip.fx), trip.home)}，出發地參考價 ${money(num(item.homePrice), trip.home)}。是不是填反了？`);
     }
     if (r.dateRule) warn.push(`${r.dateRule.text}。`);
-    if (refundOn(trip) && countsForThreshold(item, trip) && !ok && th > 0) {
+    if (item.consumed && item.consumedSeparate) warn.push('這件會拆用且單獨結帳，不計退稅。');
+    else if (item.consumed) warn.push('用掉一件，同一張收據的其他商品也不能退，所以這組目前不計退稅。勾「分開結帳」可以保住其他商品。');
+    else if (g && g.receiptBlocked) warn.push('同店有會拆用的商品，這組目前不計退稅。');
+    if (item.bought && g && g.ok && !g.boughtOk && countsForThreshold(item, trip) && !(g.date && g.date < today())) warn.push(`已買的未稅 ${money(g.boughtPretax, trip.local)} 還沒到門檻，同一天買齊計畫中的商品才會退稅。`);
+    if (refundOn(trip) && countsForThreshold(item, trip) && !ok && th > 0 && !(g && g.receiptBlocked)) {
       const rp = itemRate(item, trip);
       warn.push(g && g.tripShort
         ? `全程未稅合計還差 ${money(g.tripShort, trip.local)} 才能退稅，目前以不免稅計算。`
-        : (normStore(item.store)
+        : (g && g.date && g.date < today()
+          ? `${g.date} 的未稅合計沒到門檻，這天已過，目前以不免稅計算。`
+          : normStore(item.store)
           ? `${item.store.trim()} 同一天${item.buyer ? `、${item.buyer.trim()}` : ''}再買含稅約 ${money(grossUp(g.shortfall, rp), trip.local)} 就能退稅（未稅 ${money(g.shortfall, trip.local)}，以 ${rp}% 估），目前以不免稅計算。`
           : `未稅價未達 ${money(th, trip.local)}；填上店家可與同店同日的商品合併計算。`));
     }
     if (refundOn(trip) && item.taxFree && !item.priceIsPretax && itemRate(item, trip) <= 0) warn.push('稅率為 0，免稅沒有差異。');
     if (r.couponPending) warn.push(`折價券 ${num(item.coupon)}% 尚未確認，目前未套用。`);
     let couponNote = '';
-    if (cc) {
+    const plan = couponPlan(item, trip, items);
+    if (plan) {
+      const harm = !plan.uses(item.id) && item.couponConfirmed;
+      couponNote = `<div class="coupon-cmp ${harm ? 'bad' : ''}">${harm ? '⚠ ' : ''}${plan.uses(item.id) ? '這張建議用。' : '這張不用比較省。'}${esc(planText(plan, trip))}</div>`;
+    } else if (cc) {
       const parts = `用 ${cc.rate}% 券：折抵 ${money(cc.discount, trip.local)}${cc.lostRefund > 0.5 ? `，退稅少 ${money(cc.lostRefund, trip.local)}` : ''}`;
       couponNote = cc.netDelta > 0.5
         ? `<div class="coupon-cmp bad">⚠ ${esc(parts)}，反而多花 ${esc(money(cc.netDelta, trip.local))}（約 ${esc(money(cc.homeDelta, trip.home))}）。建議不要用這張券。</div>`
@@ -1080,7 +1250,7 @@
     }
     const item = formToItem();
     const idx = state.items.findIndex((i) => i.id === item.id);
-    if (idx >= 0) state.items[idx] = item; else state.items.push(item);
+    if (idx >= 0) { stampChanges(item, state.items[idx]); state.items[idx] = item; } else state.items.push(item);
     const trip = currentTrip();
     if (item.store) trip.lastStore = item.store;
     if (item.buyer) trip.lastBuyer = item.buyer;
@@ -1120,7 +1290,8 @@
     if (!confirm(`刪除「${it.name}」？`)) return;
     markDeleted(id);
     state.items = state.items.filter((i) => i.id !== id);
-    save(); closeEditor(true); renderAll(); toast('已刪除');
+    if (!save()) return;
+    closeEditor(true); renderAll(); toast('已刪除');
   }
 
   function readImage(file, max, quality, cb) {
@@ -1170,7 +1341,8 @@
     trip.tripMinTotal = num(form.tripMinTotal.value);
     trip.onboarded = true;
     trip.updatedAt = Date.now();
-    save(); renderAll(); toast('設定已儲存');
+    if (!save()) return;
+    renderAll(); toast('設定已儲存');
   }
 
   function applyCountryPreset(key) {
@@ -1194,7 +1366,8 @@
     const cur = currentTrip();
     const t = newTrip({ name: name.trim() || '新旅程', home: cur.home, cards: (cur.cards || []).map((c) => Object.assign({}, c)), cardFee: cur.cardFee, onboarded: false });
     state.trips.push(t); state.currentTripId = t.id;
-    save(); renderAll(); showTab('list'); openOnboard();
+    if (!save()) return;
+    renderAll(); showTab('list'); openOnboard();
   }
   function deleteTrip() {
     const trip = currentTrip();
@@ -1206,7 +1379,8 @@
     state.items = state.items.filter((i) => i.tripId !== trip.id);
     state.trips = state.trips.filter((t) => t.id !== trip.id);
     state.currentTripId = state.trips[0].id;
-    save(); renderAll(); toast('已刪除旅程');
+    if (!save()) return;
+    renderAll(); toast('已刪除旅程');
   }
   function switchTrip(id) { state.currentTripId = id; ui.store = 'all'; ui.brand = 'all'; ui.buyer = 'all'; save(); renderAll(); }
 
@@ -1217,7 +1391,8 @@
     const t = newTrip(Object.assign({}, SAMPLE_TRIP));
     state.trips.push(t); state.currentTripId = t.id;
     SAMPLE_ITEMS.forEach((s) => state.items.push(newItem(t.id, s)));
-    save(); renderAll(); showTab('list'); toast('已載入範例');
+    if (!save()) return;
+    renderAll(); showTab('list'); toast('已載入範例');
   }
 
   // ---------- 匯出／匯入／分享 ----------
@@ -1237,9 +1412,11 @@
     }
     exportJson(); toast('此裝置不支援直接分享檔案，已改為下載');
   }
-  // 同一商品以較新的修改為準（包含取消已買）；刪除紀錄比商品新時，商品會被移除
+  // 同一商品逐欄取較新的修改（包含取消已買）；刪除紀錄比商品新時，商品會被移除
   function mergeState(incoming) {
     let added = 0, updated = 0;
+    const touched = new Map(); // 各旅程有變動的商品數，用來決定合併後顯示哪個旅程
+    const bump = (tripId) => touched.set(tripId, (touched.get(tripId) || 0) + 1);
     state.deleted = state.deleted || {};
     const del = state.deleted;
     Object.keys(incoming.deleted || {}).forEach((id) => { if (!(del[id] >= incoming.deleted[id])) del[id] = incoming.deleted[id]; });
@@ -1259,10 +1436,8 @@
     incoming.items.forEach((inc) => {
       if (isDeleted(inc)) return;
       const cur = byId.get(inc.id);
-      if (!cur) { state.items.push(inc); byId.set(inc.id, inc); added++; return; }
-      if ((inc.updatedAt || 0) <= (cur.updatedAt || 0)) return;
-      Object.assign(cur, inc);
-      updated++;
+      if (!cur) { state.items.push(inc); byId.set(inc.id, inc); added++; bump(inc.tripId); return; }
+      if (mergeItem(cur, inc)) { updated++; bump(cur.tripId); }
     });
     state.trips = state.trips.filter((t) => !isDeleted(t));
     state.trips.forEach((t) => { t.coupons = (t.coupons || []).filter((c) => !isDeleted(c)); });
@@ -1271,7 +1446,17 @@
     const tripIds = new Set(state.trips.map((t) => t.id));
     const before = state.items.length;
     state.items = state.items.filter((i) => !isDeleted(i) && tripIds.has(i.tripId));
-    return { added, updated, removed: before - state.items.length };
+    // 目前的旅程沒有變動、別的旅程有時，切過去，才不會看起來像匯入失敗
+    let switched = '';
+    if (!touched.get(state.currentTripId) && touched.size) {
+      const target = Array.from(touched.entries()).filter(([id]) => tripIds.has(id)).sort((a, b) => b[1] - a[1])[0];
+      if (target) {
+        state.currentTripId = target[0];
+        ui.store = 'all'; ui.brand = 'all'; ui.buyer = 'all'; ui.status = 'all';
+        switched = (state.trips.find((t) => t.id === target[0]) || {}).name || '';
+      }
+    }
+    return { added, updated, removed: before - state.items.length, switched };
   }
   function importJson(file) {
     if (!file) return;
@@ -1284,14 +1469,16 @@
         const merge = confirm(`匯入 ${data.trips.length} 個旅程、${data.items.length} 項商品。\n\n按「確定」＝合併：雙方新增的商品都保留；同一商品以較新的修改為準，包含取消已買；對方刪除的商品也會刪除。\n按「取消」＝下一步可選擇取代全部資料。`);
         if (merge) {
           const r = mergeState(data);
-          save(); renderAll(); toast(`已合併：新增 ${r.added} 項、更新 ${r.updated} 項、移除 ${r.removed} 項`);
+          if (!save()) return;
+          renderAll(); showTab('list'); toast(`已合併：新增 ${r.added} 項、更新 ${r.updated} 項、移除 ${r.removed} 項${r.switched ? `，已切到「${r.switched}」` : ''}`);
           return;
         }
         if (!confirm('取代目前所有資料？這會清掉這支手機上既有的清單。')) return;
         state = data;
         if (!state.trips.find((t) => t.id === state.currentTripId)) state.currentTripId = state.trips[0] && state.trips[0].id;
         if (!state.trips.length) { const t = newTrip({ name: '我的旅程' }); state.trips.push(t); state.currentTripId = t.id; }
-        save(); renderAll(); toast('已取代');
+        if (!save()) return;
+        renderAll(); toast('已取代');
       } catch (_) { toast('檔案格式不正確'); }
     };
     reader.readAsText(file);
@@ -1320,7 +1507,8 @@
     } else {
       items.forEach((it) => lines.push(line(it)));
     }
-    lines.push(`預計現場付款 ${money(t.pay, trip.local)} ≈ ${money(t.payHome, trip.home)}、預計退稅 ${money(t.refund, trip.local)}、退稅後成本約 ${money(t.home, trip.home)}`);
+    lines.push(`已花 ${money(t.boughtPay, trip.local)}、已確定退稅 ${money(t.confirmedRefund, trip.local)}${t.plannedRefund > 0.5 ? `，買齊計畫再加 ${money(t.plannedRefund, trip.local)}` : ''}`);
+    lines.push(`全部買齊：現場付款 ${money(t.pay, trip.local)} ≈ ${money(t.payHome, trip.home)}，成本約 ${money(t.home, trip.home)}`);
     if (t.pending) lines.push(`有 ${t.pending} 項待查價，以上合計未含。`);
     lines.push('＊以上為試算，非官方金額。');
     return lines.join('\n');
@@ -1359,11 +1547,17 @@
     $('#btn-empty-sample').addEventListener('click', loadSample);
     $('#btn-sample').addEventListener('click', loadSample);
     $('#btn-trip-switch').addEventListener('click', () => { showTab('settings'); $('#trip-list').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
-    $('#summary').addEventListener('click', (e) => {
+    ['#summary', '#summary-more'].forEach((sel) => $(sel).addEventListener('click', (e) => {
       if (e.target.closest('[data-show-pending]')) { ui.status = 'pending'; renderList(currentTrip()); return; }
       const b = e.target.closest('[data-goto]');
       if (b) gotoSetting(b.dataset.goto);
-    });
+    }));
+    $('#btn-more').addEventListener('click', () => { ui.moreOpen = !ui.moreOpen; renderList(currentTrip()); });
+    $('#btn-filter').addEventListener('click', () => { ui.filterOpen = !ui.filterOpen; renderList(currentTrip()); });
+    $('#quick-form').addEventListener('focusin', () => $('#quick-form').classList.add('open'));
+    document.addEventListener('click', (e) => { if (!e.target.closest('#quick-form')) $('#quick-form').classList.remove('open'); });
+    $('#btn-banner-close').addEventListener('click', () => { $('#app-banner').hidden = true; });
+    $('#btn-banner-download').addEventListener('click', () => { if ($('#app-banner').dataset.kind === 'corrupt') downloadCorrupt(); else exportJson(); });
     $('#quick-form').addEventListener('submit', quickAdd);
 
     $('#store-chips').addEventListener('click', (e) => { const b = e.target.closest('[data-store]'); if (b) { ui.store = b.dataset.store; renderList(currentTrip()); } });
@@ -1375,7 +1569,13 @@
       const buy = e.target.closest('[data-buy]');
       if (buy) {
         const it = state.items.find((i) => i.id === buy.dataset.buy);
-        if (it) { it.bought = !it.bought; it.updatedAt = Date.now(); if (it.bought && !it.date) it.date = today(); save(); renderAll(); }
+        if (it) {
+          const prev = Object.assign({}, it);
+          it.bought = !it.bought; it.updatedAt = Date.now();
+          if (it.bought && !it.date) it.date = today();
+          stampChanges(it, prev);
+          save(); renderAll();
+        }
         return;
       }
       const open = e.target.closest('[data-open]');
@@ -1392,7 +1592,7 @@
     $('#item-form').addEventListener('change', (e) => {
       const form = $('#item-form');
       if (e.target.name === 'bought' && e.target.checked && !form.date.value) form.date.value = today();
-      if (e.target.name === 'priceIsPretax') renderTaxRows(currentTrip());
+      if (e.target.name === 'priceIsPretax' || e.target.name === 'consumed') renderTaxRows(currentTrip());
       renderEditorResult(); saveDraft();
     });
     $('#store-quick').addEventListener('click', (e) => {
@@ -1495,13 +1695,14 @@
     window.addEventListener('appinstalled', () => { ui.installEvent = null; renderInstall(); toast('已安裝到主畫面'); });
 
     // 與另一個分頁同步
-    window.addEventListener('storage', (e) => { if (e.key === STORAGE_KEY) { state = load(); renderAll(); } });
+    window.addEventListener('storage', (e) => { if (e.key === STORAGE_KEY) { state = load(); lastSaved = JSON.stringify(state); renderAll(); } });
   }
 
   // ---------- 啟動 ----------
   bind();
   renderAll();
   showTab('list');
+  if (corruptRaw) showBanner('corrupt');
   const pending = readDraft();
   const trip0 = currentTrip();
   if (pending && pending.tripId === trip0.id && (pending.data && (pending.data.name || pending.data.localPrice))) {

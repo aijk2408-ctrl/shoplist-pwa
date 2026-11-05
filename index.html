@@ -27,11 +27,25 @@
   </div>
 </header>
 
+<div class="app-banner" id="app-banner" role="alert" hidden>
+  <p id="app-banner-text"></p>
+  <div class="row">
+    <button type="button" class="btn small" id="btn-banner-download">下載備份</button>
+    <button type="button" class="btn small" id="btn-banner-close">知道了</button>
+  </div>
+</div>
+
 <main id="main">
 
   <!-- 清單 -->
   <section class="view" id="view-list" data-view="list">
     <div class="summary" id="summary"></div>
+    <div class="list-tools">
+      <button type="button" class="chip" id="btn-more">更多數字 ▾</button>
+      <button type="button" class="chip" id="btn-coupons">🎫 我的券</button>
+      <button type="button" class="chip" id="btn-filter">篩選</button>
+    </div>
+    <div class="summary" id="summary-more" hidden></div>
 
     <form class="quick" id="quick-form" autocomplete="off">
       <div class="quick-row">
@@ -45,12 +59,13 @@
       </div>
       <p class="hint" id="quick-hint"></p>
     </form>
-    <div class="row left"><button type="button" class="btn small" id="btn-coupons">🎫 我的券</button><span class="hint" id="coupon-hint"></span></div>
 
     <div class="filters">
-      <div class="chips" id="store-chips"></div>
-      <div class="chips" id="buyer-chips"></div>
-      <div class="chips" id="brand-chips"></div>
+      <div class="filter-panel" id="filter-panel" hidden>
+        <div class="chips" id="store-chips"></div>
+        <div class="chips" id="buyer-chips"></div>
+        <div class="chips" id="brand-chips"></div>
+      </div>
       <div class="chips status-chips">
         <button type="button" class="chip active" data-status="all">全部</button>
         <button type="button" class="chip" data-status="todo">未買</button>
@@ -247,6 +262,13 @@
       <div class="chips store-quick" id="buyer-quick"></div>
 
       <div id="taxfree-row"><label class="check"><input type="checkbox" name="taxFree" checked>可辦免稅／退稅（須符合門市條件）</label></div>
+      <div id="consumed-row">
+        <label class="check"><input type="checkbox" name="consumed">旅途中會拆開使用（例如尿布、零食）</label>
+        <div id="consumed-detail" hidden>
+          <label class="check small-check"><input type="checkbox" name="consumedSeparate">這件會和其他商品分開結帳</label>
+          <p class="hint">用掉一件，同一張收據的其他商品也不能退，出境時要向稅關申報。會拆用的東西建議單獨結帳。</p>
+        </div>
+      </div>
       <div class="grid2">
         <label>折價券 %<input type="number" name="coupon" min="0" max="99" step="any" value="0" inputmode="decimal"></label>
         <label class="check tall"><input type="checkbox" name="couponConfirmed">店員已確認此商品可用券</label>

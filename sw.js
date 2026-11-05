@@ -1,5 +1,5 @@
 /* 出國購物清單 PWA service worker：快取 App 外殼，離線可開啟 */
-const VERSION = 'shoplist-v7';
+const VERSION = 'shoplist-v8';
 const SHELL = [
   './',
   './index.html',
