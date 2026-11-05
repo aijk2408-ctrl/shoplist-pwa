@@ -41,6 +41,12 @@ main{max-width:720px;margin:auto;padding:12px 16px 20px}
 .quick-row input{margin:0;padding:10px;font-size:.95rem}
 .quick-row .btn{padding:8px 14px}
 .quick .hint{margin-top:6px;font-size:.78rem}
+.quick-row2{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+.quick-row2 input{margin:0;padding:8px 10px;font-size:.9rem}
+.item .pending{color:#8a5a00;font-weight:800}
+.g-warn{margin:6px 0 0;font-size:.84rem;font-weight:700;color:#a3321f}
+.coupon-cmp{margin-top:8px;padding:8px 10px;border-radius:10px;background:#ffffffb8;font-size:.86rem;font-weight:700;color:#1f6b43}
+.coupon-cmp.bad{color:#a3321f}
 
 /* 摘要 */
 .summary{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}

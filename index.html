@@ -39,6 +39,10 @@
         <input type="number" name="price" min="0" step="any" inputmode="decimal" placeholder="標價" aria-label="當地標價">
         <button type="submit" class="btn primary">記下</button>
       </div>
+      <div class="quick-row2">
+        <input type="text" name="store" list="store-list" placeholder="店家" aria-label="店家">
+        <input type="text" name="buyer" list="buyer-list" placeholder="買者" aria-label="買者">
+      </div>
       <p class="hint" id="quick-hint"></p>
     </form>
     <div class="row left"><button type="button" class="btn small" id="btn-coupons">🎫 我的券</button><span class="hint" id="coupon-hint"></span></div>
@@ -51,6 +55,7 @@
         <button type="button" class="chip active" data-status="all">全部</button>
         <button type="button" class="chip" data-status="todo">未買</button>
         <button type="button" class="chip" data-status="done">已買</button>
+        <button type="button" class="chip" data-status="pending">待查價</button>
       </div>
     </div>
     <div id="item-list" class="item-list"></div>
@@ -117,14 +122,14 @@
       <label id="airport-row">出境機場（退稅指引會依此顯示）<select name="airport" id="airport-select"></select></label>
 
       <h3>付款與手續費</h3>
-      <label>預設刷卡手續費 %<input type="number" name="cardFee" step="0.1" min="0" max="20" inputmode="decimal"></label>
+      <label>預設刷卡手續費 %<input type="number" name="cardFee" step="any" min="0" max="20" inputmode="decimal"></label>
       <p class="hint">台灣多數信用卡海外交易 1.5%。結帳時選當地幣別，不要選本國幣別（DCC），否則會多付 3～5%。</p>
       <div id="cards-list" class="cards-list"></div>
       <div class="row"><button type="button" class="btn small" id="btn-card-add">＋ 新增一張卡（不同費率）</button></div>
 
       <h3>稅與門檻</h3>
       <div class="grid2">
-        <label>消費稅率 %<input type="number" name="taxRate" step="0.1" min="0" max="50" inputmode="decimal"></label>
+        <label>消費稅率 %<input type="number" name="taxRate" step="any" min="0" max="50" inputmode="decimal"></label>
         <label>免稅門檻（未稅，同店同日）<input type="number" name="threshold" step="1" min="0" inputmode="numeric"></label>
       </div>
       <label class="check"><input type="checkbox" name="refundEnabled" checked>這趟會辦理免稅／退稅（不辦的話全部以含稅價計算）</label>
@@ -136,7 +141,7 @@
       <details class="more">
         <summary>進階退稅參數（百貨手續費、泰國／歐洲規則）</summary>
         <div class="grid2">
-          <label>退稅手續費 %（以購買金額計）<input type="number" name="refundFeePct" step="0.01" min="0" max="20" inputmode="decimal" placeholder="例：百貨 1.55"></label>
+          <label>退稅手續費 %（以購買金額計）<input type="number" name="refundFeePct" step="any" min="0" max="20" inputmode="decimal" placeholder="例：百貨 1.55"></label>
           <label>實際退回稅額比例 %<input type="number" name="refundRatio" step="1" min="0" max="100" inputmode="numeric" placeholder="預設 100"></label>
         </div>
         <label>全程最低總額（未稅，<span class="local-code">JPY</span>）<input type="number" name="tripMinTotal" step="1" min="0" inputmode="numeric" placeholder="例：泰國 5000，日本填 0"></label>
@@ -165,7 +170,7 @@
         <label class="btn file-btn">匯入備份檔<input type="file" id="file-import" accept="application/json,.json" hidden></label>
         <button type="button" class="btn" id="btn-sample">載入沖繩範例</button>
       </div>
-      <p class="hint">資料只存在這支手機的瀏覽器，不會上傳。同行者各自用手機勾選後，互相「分享備份檔」再「匯入」並選合併，雙方的新增與已購買都會保留。</p>
+      <p class="hint">資料只存在這支手機的瀏覽器，不會上傳。同行者各自用手機勾選後，互相「分享備份檔」再「匯入」並選合併：雙方新增的商品都保留，同一商品以較新的修改為準，刪除也會同步。</p>
     </div>
 
     <div class="card" id="install-card">
@@ -178,6 +183,7 @@
       <h2>關於試算</h2>
       <p class="hint">所有金額皆為試算，非官方計算。日本規則依 2026/11/1 起的出境退稅制整理，查核日期 2026/11/3；各店是否可免稅、折價券能否併用，請以店員確認為準。</p>
       <div class="row"><button type="button" class="btn small" id="btn-onboard-again">重新執行首次設定</button></div>
+      <p class="hint" id="app-version"></p>
     </div>
   </section>
 </main>
@@ -204,7 +210,7 @@
       <label>商品名稱<input type="text" name="name" required placeholder="例：合利他命 EX Plus 270 錠"></label>
 
       <div class="price-block">
-        <label class="big-label">當地標價（<span class="local-code">JPY</span>，含稅）
+        <label class="big-label">當地標價（<span class="local-code">JPY</span>，<span id="local-price-kind">含稅</span>）
           <div class="money-input"><span class="prefix local-sym">¥</span><input type="number" name="localPrice" min="0" step="any" inputmode="decimal" placeholder="店內標籤上的價格"></div>
         </label>
         <label class="check small-check"><input type="checkbox" name="priceIsPretax">標價已不含稅（機場免稅店、店家已扣稅）</label>
@@ -242,7 +248,7 @@
 
       <div id="taxfree-row"><label class="check"><input type="checkbox" name="taxFree" checked>可辦免稅／退稅（須符合門市條件）</label></div>
       <div class="grid2">
-        <label>折價券 %<input type="number" name="coupon" min="0" max="99" step="0.1" value="0" inputmode="decimal"></label>
+        <label>折價券 %<input type="number" name="coupon" min="0" max="99" step="any" value="0" inputmode="decimal"></label>
         <label class="check tall"><input type="checkbox" name="couponConfirmed">店員已確認此商品可用券</label>
       </div>
 
